@@ -182,6 +182,7 @@ def gemini_response_to_openai(gemini_response: Dict[str, Any], model: str) -> Di
         parts = candidate.get("content", {}).get("parts", [])
         content = ""
         tool_calls = []
+        reasoning_content = ""
         for part in parts:
             if 'functionCall' in part:
                 fc = part['functionCall']
@@ -193,6 +194,8 @@ def gemini_response_to_openai(gemini_response: Dict[str, Any], model: str) -> Di
                         "arguments": json.dumps(fc.get('args', {})),
                     }
                 })
+            elif part.get("thought", False):
+                 reasoning_content += part.get("text", "")
             elif 'text' in part:
                  content += part.get("text", "")
 
@@ -251,6 +254,7 @@ def gemini_stream_chunk_to_openai(gemini_chunk: Dict[str, Any], model: str, resp
         delta = {}
         tool_calls_chunks = []
         content_chunk = ""
+        reasoning_content = ""
 
         for i, part in enumerate(parts):
             if 'functionCall' in part:
@@ -264,6 +268,8 @@ def gemini_stream_chunk_to_openai(gemini_chunk: Dict[str, Any], model: str, resp
                         "arguments": json.dumps(fc.get('args', {})),
                     }
                 })
+            elif part.get("thought", False):
+                reasoning_content += part.get("text", "")
             elif 'text' in part:
                 content_chunk += part.get("text", "")
         
