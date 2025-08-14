@@ -202,10 +202,13 @@ def gemini_response_to_openai(gemini_response: Dict[str, Any], model: str) -> Di
         }
         if tool_calls:
             message["tool_calls"] = tool_calls
+        if reasoning_content:
+            message["reasoning_content"] = reasoning_content
         
         finish_reason = _map_finish_reason(candidate.get("finishReason"))
         if tool_calls:
             finish_reason = "tool_calls"
+        
         
         choices.append({
             "index": candidate.get("index", 0),
@@ -268,10 +271,13 @@ def gemini_stream_chunk_to_openai(gemini_chunk: Dict[str, Any], model: str, resp
             delta["content"] = content_chunk
         if tool_calls_chunks:
             delta["tool_calls"] = tool_calls_chunks
+        if reasoning_content:
+            message["reasoning_content"] = reasoning_content
         
         finish_reason = _map_finish_reason(candidate.get("finishReason"))
         if tool_calls_chunks:
             finish_reason = "tool_calls"
+        
         
         choices.append({
             "index": candidate.get("index", 0),
