@@ -119,6 +119,41 @@ def openai_request_to_gemini(openai_request: OpenAIChatCompletionRequest) -> Dic
             "thinkingBudget": thinking_budget,
             "includeThoughts": should_include_thoughts(openai_request.model)
         }
+
+    function_declarations = []
+    if openai_request.tools:
+        for tool in openai_request.tools:
+            if tool.get("type") == "function":
+                func_def = tool.get("function")
+                if func_def and func_def.get("name"):
+                    declaration = {k: v for k, v in func_def.items() if v is not None}
+                    function_declarations.append(declaration)
+
+    if function_declarations:
+        request_payload["tools"] = [{"functionDeclarations": function_declarations}]
+
+    tool_config = None
+    if openai_request.tool_choice and function_declarations:
+        choice = openai_request.tool_choice
+        mode = None
+        allowed_functions = None
+        if isinstance(choice, str):
+            if choice == "none": mode = "NONE"
+            elif choice == "auto": mode = "AUTO"
+        elif isinstance(choice, dict) and choice.get("type") == "function":
+            func_name = choice.get("function", {}).get("name")
+            if func_name:
+                mode = "ANY"
+                allowed_functions = [func_name]
+        
+        if mode:
+            config = {"mode": mode}
+            if allowed_functions:
+                config["allowedFunctionNames"] = allowed_functions
+            tool_config = {"functionCallingConfig": config}
+
+    if tool_config:
+        request_payload["toolConfig"] = tool_config
     
     return request_payload
 
@@ -146,27 +181,31 @@ def gemini_response_to_openai(gemini_response: Dict[str, Any], model: str) -> Di
         # Extract and separate thinking tokens from regular content
         parts = candidate.get("content", {}).get("parts", [])
         content = ""
-        reasoning_content = ""
-        
+        tool_calls = []
         for part in parts:
-            if not part.get("text"):
-                continue
-            
-            # Check if this part contains thinking tokens
-            if part.get("thought", False):
-                reasoning_content += part.get("text", "")
-            else:
-                content += part.get("text", "")
-        
-        # Build message object
+            if 'functionCall' in part:
+                fc = part['functionCall']
+                tool_calls.append({
+                    "id": f"call_{fc.get('name')}_{uuid.uuid4()}",
+                    "type": "function",
+                    "function": {
+                        "name": fc.get('name'),
+                        "arguments": json.dumps(fc.get('args', {})),
+                    }
+                })
+            elif 'text' in part:
+                 content += part.get("text", "")
+
         message = {
-            "role": role,
-            "content": content,
+            "role": "assistant",
+            "content": content if not tool_calls else None,
         }
+        if tool_calls:
+            message["tool_calls"] = tool_calls
         
-        # Add reasoning_content if there are thinking tokens
-        if reasoning_content:
-            message["reasoning_content"] = reasoning_content
+        finish_reason = _map_finish_reason(candidate.get("finishReason"))
+        if tool_calls:
+            finish_reason = "tool_calls"
         
         choices.append({
             "index": candidate.get("index", 0),
@@ -206,25 +245,33 @@ def gemini_stream_chunk_to_openai(gemini_chunk: Dict[str, Any], model: str, resp
         
         # Extract and separate thinking tokens from regular content
         parts = candidate.get("content", {}).get("parts", [])
-        content = ""
-        reasoning_content = ""
-        
-        for part in parts:
-            if not part.get("text"):
-                continue
-            
-            # Check if this part contains thinking tokens
-            if part.get("thought", False):
-                reasoning_content += part.get("text", "")
-            else:
-                content += part.get("text", "")
-        
-        # Build delta object
         delta = {}
-        if content:
-            delta["content"] = content
-        if reasoning_content:
-            delta["reasoning_content"] = reasoning_content
+        tool_calls_chunks = []
+        content_chunk = ""
+
+        for i, part in enumerate(parts):
+            if 'functionCall' in part:
+                fc = part['functionCall']
+                tool_calls_chunks.append({
+                    "index": i, # 流式中需要 index
+                    "id": f"call_{fc.get('name')}_{uuid.uuid4()}",
+                    "type": "function",
+                    "function": {
+                        "name": fc.get('name'),
+                        "arguments": json.dumps(fc.get('args', {})),
+                    }
+                })
+            elif 'text' in part:
+                content_chunk += part.get("text", "")
+        
+        if content_chunk:
+            delta["content"] = content_chunk
+        if tool_calls_chunks:
+            delta["tool_calls"] = tool_calls_chunks
+        
+        finish_reason = _map_finish_reason(candidate.get("finishReason"))
+        if tool_calls_chunks:
+            finish_reason = "tool_calls"
         
         choices.append({
             "index": candidate.get("index", 0),
