@@ -20,6 +20,8 @@ class OpenAIChatCompletionRequest(BaseModel):
     n: Optional[int] = None
     seed: Optional[int] = None
     response_format: Optional[Dict[str, Any]] = None
+    tools: Optional[List[Dict[str, Any]]] = None
+    tool_choice: Optional[Union[str, Dict[str, Any]]] = "auto"
     
     class Config:
         extra = "allow"  # Allow additional fields not explicitly defined
