@@ -5,7 +5,8 @@ This module contains all the logic for transforming requests and responses betwe
 import json
 import time
 import uuid
-from typing import Dict, Any
+from typing import Dict, Any, Union
+
 
 from .models import OpenAIChatCompletionRequest, OpenAIChatCompletionResponse
 from .config import (
