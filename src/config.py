@@ -225,7 +225,7 @@ def get_thinking_budget(model_name):
         if "gemini-2.5-flash" in base_model:
             return 0  # No thinking for flash
         elif "gemini-2.5-pro" in base_model:
-            return 128  # Limited thinking for pro
+            return 512  # Limited thinking for pro
     elif is_maxthinking_model(model_name):
         if "gemini-2.5-flash" in base_model:
             return 24576
