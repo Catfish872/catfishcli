@@ -207,6 +207,10 @@ def gemini_response_to_openai(gemini_response: Dict[str, Any], model: str) -> Di
             message["tool_calls"] = tool_calls
         if reasoning_content:
             message["reasoning_content"] = reasoning_content
+
+        import logging
+        import json
+        logging.critical(f"GEMINI_DEBUG_MESSAGE_OBJECT ::: {json.dumps(message)}")
         
         finish_reason = _map_finish_reason(candidate.get("finishReason"))
         if tool_calls:
