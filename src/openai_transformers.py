@@ -21,54 +21,95 @@ from .config import (
 
 def openai_request_to_gemini(openai_request: OpenAIChatCompletionRequest) -> Dict[str, Any]:
     """
-    Transform an OpenAI chat completion request to Gemini format.
-    
-    Args:
-        openai_request: OpenAI format request
-        
-    Returns:
-        Dictionary in Gemini API format
+    将 OpenAI 聊天请求转换为 Gemini 格式。
+    此版本经过修正，可正确处理所有消息角色，特别是 'tool' 角色。
     """
     contents = []
     
-    # Process each message in the conversation
+    # ------------------------------------------------------------------
+    #  1. 转换对话历史 (messages)
+    #     这是经过修正的核心逻辑
+    # ------------------------------------------------------------------
     for message in openai_request.messages:
         role = message.role
         
-        # Map OpenAI roles to Gemini roles
-        if role == "assistant":
-            role = "model"
-        elif role == "system":
-            role = "user"  # Gemini treats system messages as user messages
-        
-        # Handle different content types (string vs list of parts)
-        if isinstance(message.content, list):
+        if role == "system":
+            # Gemini 将 system prompt 视为 user message
+            contents.append({"role": "user", "parts": [{"text": str(message.content)}]})
+
+        elif role == "user":
+            # 处理标准的用户消息 (可能包含多模态内容)
+            if isinstance(message.content, list):
+                parts = []
+                for part in message.content:
+                    if part.get("type") == "text":
+                        parts.append({"text": part.get("text", "")})
+                    elif part.get("type") == "image_url":
+                        image_url = part.get("image_url", {}).get("url")
+                        if image_url:
+                            try:
+                                mime_type, base64_data = image_url.split(";")
+                                _, mime_type = mime_type.split(":")
+                                _, base64_data = base64_data.split(",")
+                                parts.append({
+                                    "inlineData": {
+                                        "mimeType": mime_type,
+                                        "data": base64_data
+                                    }
+                                })
+                            except ValueError:
+                                continue
+                if parts:
+                    contents.append({"role": "user", "parts": parts})
+            else:
+                contents.append({"role": "user", "parts": [{"text": str(message.content)}]})
+
+        elif role == "assistant":
+            # 处理助手的回复 (可能包含文本和/或工具调用)
             parts = []
-            for part in message.content:
-                if part.get("type") == "text":
-                    parts.append({"text": part.get("text", "")})
-                elif part.get("type") == "image_url":
-                    image_url = part.get("image_url", {}).get("url")
-                    if image_url:
-                        # Parse data URI: "data:image/jpeg;base64,{base64_image}"
-                        try:
-                            mime_type, base64_data = image_url.split(";")
-                            _, mime_type = mime_type.split(":")
-                            _, base64_data = base64_data.split(",")
-                            parts.append({
-                                "inlineData": {
-                                    "mimeType": mime_type,
-                                    "data": base64_data
-                                }
-                            })
-                        except ValueError:
-                            continue
-            contents.append({"role": role, "parts": parts})
-        else:
-            # Simple text content
-            contents.append({"role": role, "parts": [{"text": message.content}]})
-    
-    # Map OpenAI generation parameters to Gemini format
+            if message.tool_calls:
+                for tc in message.tool_calls:
+                    parts.append({
+                        "functionCall": {
+                            "name": tc.get("function", {}).get("name"),
+                            "args": json.loads(tc.get("function", {}).get("arguments", "{}"))
+                        }
+                    })
+            if message.content:
+                parts.append({"text": str(message.content)})
+            
+            if parts:
+                contents.append({"role": "model", "parts": parts})
+
+        elif role == "tool":
+            # 这是修复 400 错误的关键：将 'tool' 消息伪装成 'user' 消息
+            func_name = message.name
+            if not func_name:
+                # 如果客户端没有在 tool message 中提供 name，我们必须回溯查找
+                # 这是保证功能完整的必要逻辑
+                for i in range(len(openai_request.messages) - 1, -1, -1):
+                    prev_msg = openai_request.messages[i]
+                    if prev_msg.role == "assistant" and prev_msg.tool_calls:
+                        for tc in prev_msg.tool_calls:
+                            if tc.get("id") == message.tool_call_id:
+                                func_name = tc.get("function", {}).get("name")
+                                break
+                    if func_name:
+                        break
+            
+            contents.append({
+                "role": "user", # 核心修改：将 'tool' 伪装成 'user'
+                "parts": [{
+                    "functionResponse": {
+                        "name": func_name or "function_name_not_found",
+                        "response": {"content": message.content}
+                    }
+                }]
+            })
+
+    # ------------------------------------------------------------------
+    #  2. 转换 API 参数 (这部分逻辑保持不变)
+    # ------------------------------------------------------------------
     generation_config = {}
     if openai_request.temperature is not None:
         generation_config["temperature"] = openai_request.temperature
@@ -77,43 +118,35 @@ def openai_request_to_gemini(openai_request: OpenAIChatCompletionRequest) -> Dic
     if openai_request.max_tokens is not None:
         generation_config["maxOutputTokens"] = openai_request.max_tokens
     if openai_request.stop is not None:
-        # Gemini supports stop sequences
         if isinstance(openai_request.stop, str):
             generation_config["stopSequences"] = [openai_request.stop]
         elif isinstance(openai_request.stop, list):
             generation_config["stopSequences"] = openai_request.stop
     if openai_request.frequency_penalty is not None:
-        # Map frequency_penalty to Gemini's frequencyPenalty
         generation_config["frequencyPenalty"] = openai_request.frequency_penalty
     if openai_request.presence_penalty is not None:
-        # Map presence_penalty to Gemini's presencePenalty
         generation_config["presencePenalty"] = openai_request.presence_penalty
     if openai_request.n is not None:
-        # Map n (number of completions) to Gemini's candidateCount
         generation_config["candidateCount"] = openai_request.n
     if openai_request.seed is not None:
-        # Gemini supports seed for reproducible outputs
         generation_config["seed"] = openai_request.seed
     if openai_request.response_format is not None:
-        # Handle JSON mode if specified
         if openai_request.response_format.get("type") == "json_object":
             generation_config["responseMimeType"] = "application/json"
-    
-    # generation_config["enableEnhancedCivicAnswers"] = False
 
-    # Build the request payload
+    # ------------------------------------------------------------------
+    #  3. 构建最终请求体 (这部分逻辑保持不变)
+    # ------------------------------------------------------------------
     request_payload = {
         "contents": contents,
         "generationConfig": generation_config,
         "safetySettings": DEFAULT_SAFETY_SETTINGS,
-        "model": get_base_model_name(openai_request.model)  # Use base model name for API call
+        "model": get_base_model_name(openai_request.model)
     }
     
-    # Add Google Search grounding for search models
     if is_search_model(openai_request.model):
         request_payload["tools"] = [{"googleSearch": {}}]
     
-    # Add thinking configuration for thinking models
     thinking_budget = get_thinking_budget(openai_request.model)
     if thinking_budget is not None:
         request_payload["generationConfig"]["thinkingConfig"] = {
@@ -121,6 +154,7 @@ def openai_request_to_gemini(openai_request: OpenAIChatCompletionRequest) -> Dic
             "includeThoughts": should_include_thoughts(openai_request.model)
         }
 
+    # 处理工具声明 (Function Declarations)
     function_declarations = []
     if openai_request.tools:
         for tool in openai_request.tools:
@@ -133,6 +167,7 @@ def openai_request_to_gemini(openai_request: OpenAIChatCompletionRequest) -> Dic
     if function_declarations:
         request_payload["tools"] = [{"functionDeclarations": function_declarations}]
 
+    # 处理工具选择 (Tool Choice)
     tool_config = None
     if openai_request.tool_choice and function_declarations:
         choice = openai_request.tool_choice
