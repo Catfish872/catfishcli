@@ -210,7 +210,11 @@ async def openai_chat_completions(
                 openai_response = gemini_response_to_openai(gemini_response, request.model)
                 
                 logging.info(f"Successfully processed non-streaming response for model: {request.model}")
-                return openai_response
+                
+                return Response(
+                    content=json.dumps(openai_response),
+                    media_type="application/json"
+                )
                 
             except (json.JSONDecodeError, AttributeError) as e:
                 logging.error(f"Failed to parse Gemini response: {str(e)}")
