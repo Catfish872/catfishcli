@@ -5,6 +5,7 @@ This module contains all the logic for transforming requests and responses betwe
 import json
 import time
 import uuid
+import logging
 from typing import Dict, Any, Union
 
 
@@ -208,8 +209,6 @@ def gemini_response_to_openai(gemini_response: Dict[str, Any], model: str) -> Di
         if reasoning_content:
             message["reasoning_content"] = reasoning_content
 
-        import logging
-        import json
         logging.critical(f"GEMINI_DEBUG_MESSAGE_OBJECT ::: {json.dumps(message)}")
         
         finish_reason = _map_finish_reason(candidate.get("finishReason"))
