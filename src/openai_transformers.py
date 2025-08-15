@@ -201,7 +201,7 @@ def gemini_response_to_openai(gemini_response: Dict[str, Any], model: str) -> Di
 
         message = {
             "role": "assistant",
-            "content": content if not tool_calls else None,
+            "content": content if not tool_calls else "",
         }
         if tool_calls:
             message["tool_calls"] = tool_calls
