@@ -4,8 +4,10 @@ from typing import List, Optional, Union, Dict, Any
 # OpenAI Models
 class OpenAIChatMessage(BaseModel):
     role: str
-    content: Optional[Union[str, List[Dict[str, Any]]]] = None 
+    content: Optional[Union[str, List[Dict[str, Any]]]] = None
     tool_calls: Optional[List[Dict[str, Any]]] = None
+    tool_call_id: Optional[str] = None
+    name: Optional[str] = None 
     reasoning_content: Optional[str] = None
 
 class OpenAIChatCompletionRequest(BaseModel):
