@@ -9,6 +9,8 @@ license: mit
 app_port: 7860
 ---
 
+# 在原项目上添加了工具调用支持，现在可以正常解析工具列表和工具调用结果，并传递给LLM
+
 # Gemini CLI to API Proxy (geminicli2api)
 
 A FastAPI-based proxy server that converts the Gemini CLI tool into both OpenAI-compatible and native Gemini API endpoints. This allows you to leverage Google's free Gemini API quota through familiar OpenAI API interfaces or direct Gemini API calls.
