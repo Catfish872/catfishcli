@@ -215,13 +215,15 @@ def get_user_project_id(creds):
         return env_project_id
 
     # Priority 2: Find the project_id from the account matching the current credentials
-    # This is the core of the fix for polling
     if creds and creds.refresh_token:
-        with file_lock: # Ensure we are reading a consistent state
-             for acc in ACCOUNTS:
+        with file_lock:
+            # CORRECTED INDENTATION ON THE LINE BELOW
+            for acc in ACCOUNTS:
                 if acc.get("refresh_token") == creds.refresh_token:
                     if acc.get("project_id"):
                         return acc["project_id"]
+                    # If account is found but no project_id, break to use API discovery
+                    break
     
     # Priority 3: Fallback to API discovery if project_id is missing in the file
     logging.warning("Could not find project_id in the selected account data, attempting API discovery.")
@@ -327,7 +329,8 @@ def _manual_oauth_flow():
     server.handle_request()
     
     auth_code = _OAuthCallbackHandler.auth_code
-    if not auth_code: return None
+    if not auth_code:
+        return None
 
     try:
         flow.fetch_token(code=auth_code)
@@ -357,4 +360,4 @@ def _manual_oauth_flow():
         return new_creds
     except Exception as e:
         logging.error(f"Authentication failed: {e}")
-        return None```
+        return None
