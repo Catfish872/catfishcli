@@ -304,7 +304,7 @@ def get_credentials(allow_oauth_flow=True):
         return None
 
     import oauthlib.oauth2.rfc6749.parameters
-    original_validate = oauthlib.oauth2.rfc6-749.parameters.validate_token_parameters
+    original_validate = oauthlib.oauth2.rfc6749.parameters.validate_token_parameters
     
     def patched_validate(params):
         try:
