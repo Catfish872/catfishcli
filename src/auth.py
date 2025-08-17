@@ -142,33 +142,30 @@ def get_credentials(allow_oauth_flow=True):
     # 引用全局变量
     global credentials, credentials_from_env, user_project_id, polling_credentials, polling_index
     
-    # Check for credentials in environment variable (JSON string) - This is now secondary.
-    env_creds_json = os.getenv("GEMINI_CREDENTIALS")
-    if env_creds_json:
-        # This block is now just for logging a warning, as the primary logic has moved to file handling.
-        logging.warning("Detected GEMINI_CREDENTIALS variable. Note: The primary polling logic now reads from the file specified by GOOGLE_APPLICATION_CREDENTIALS for consistency.")
-    
-    # Check for credentials file (CREDENTIAL_FILE is derived from GOOGLE_APPLICATION_CREDENTIALS, which is the correct, verified path)
+    # --- BUG FIX ---
+    # The original caching logic below is REMOVED because it breaks polling.
+    # In a polling scenario, we MUST re-evaluate which credential to use on every call.
+    #
+    # DELETED CODE:
+    # if credentials and credentials.token and not credentials.expired:
+    #     return credentials
+
+    # Check for credentials file (CREDENTIAL_FILE is derived from GOOGLE_APPLICATION_CREDENTIALS)
     if os.path.exists(CREDENTIAL_FILE):
         try:
             # If our polling list is empty, load it once from the file.
-            # This prevents re-reading and re-parsing the file on every single request.
             if not polling_credentials:
                 with open(CREDENTIAL_FILE, "r") as f:
                     loaded_json = json.load(f)
                 
-                # Defensive check: Is the file content a list for polling?
                 if isinstance(loaded_json, list):
                     if not loaded_json:
                         raise ValueError(f"The credential file '{CREDENTIAL_FILE}' is an empty list.")
                     polling_credentials = loaded_json
                     logging.info(f"Successfully loaded {len(polling_credentials)} polling credentials from file.")
-                
-                # Fallback mechanism: Is it a single dictionary? Handle for backward compatibility.
                 elif isinstance(loaded_json, dict):
                     polling_credentials = [loaded_json]
                     logging.info(f"Detected a single credential object in file. Loaded in compatibility mode.")
-                
                 else:
                     raise ValueError(f"The format of '{CREDENTIAL_FILE}' is not recognized. It must be a JSON object or a JSON array.")
 
@@ -178,16 +175,13 @@ def get_credentials(allow_oauth_flow=True):
                 import threading
                 with threading.Lock():
                     selected_cred_info = polling_credentials[polling_index]
-                    # Advance the index for the next request in a round-robin fashion
                     polling_index = (polling_index + 1) % len(polling_credentials)
             
             if not selected_cred_info:
                 raise ValueError("Polling credentials list is empty or invalid.")
 
-            # Hand off the selected credential to the original, robust processing logic
             raw_creds_data = selected_cred_info
             
-            # SAFEGUARD: The selected credential must have a refresh token to be useful.
             if "refresh_token" in raw_creds_data and raw_creds_data["refresh_token"]:
                 current_cred_index = (polling_index - 1 + len(polling_credentials)) % len(polling_credentials)
                 logging.info(f"Using credential at index {current_cred_index}.")
@@ -195,13 +189,10 @@ def get_credentials(allow_oauth_flow=True):
                 try:
                     creds_data = raw_creds_data.copy()
                     
-                    # --- Start of the original, unmodified, robust credential handling logic ---
                     if "access_token" in creds_data and "token" not in creds_data:
                         creds_data["token"] = creds_data["access_token"]
-                    
                     if "scope" in creds_data and "scopes" not in creds_data:
                         creds_data["scopes"] = creds_data["scope"].split()
-                    
                     if "expiry" in creds_data:
                         expiry_str = creds_data["expiry"]
                         if isinstance(expiry_str, str) and ("+00:00" in expiry_str or "Z" in expiry_str):
@@ -217,23 +208,23 @@ def get_credentials(allow_oauth_flow=True):
                                 import time
                                 timestamp = parsed_expiry.timestamp()
                                 creds_data["expiry"] = datetime.utcfromtimestamp(timestamp).strftime("%Y-%m-%dT%H:%M:%SZ")
-                            except Exception as expiry_error:
-                                logging.warning(f"Could not parse expiry format '{expiry_str}': {expiry_error}, removing field.")
+                            except Exception:
                                 del creds_data["expiry"]
                     
-                    credentials = Credentials.from_authorized_user_info(creds_data, SCOPES)
+                    # Create a NEW credentials object for this specific request
+                    request_credentials = Credentials.from_authorized_user_info(creds_data, SCOPES)
                     credentials_from_env = bool(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
 
-                    if credentials.expired and credentials.refresh_token:
+                    if request_credentials.expired and request_credentials.refresh_token:
                         try:
                             logging.info(f"Credential at index {current_cred_index} is expired, attempting refresh...")
-                            credentials.refresh(GoogleAuthRequest())
+                            request_credentials.refresh(GoogleAuthRequest())
                             logging.info(f"Credential at index {current_cred_index} refreshed successfully.")
-                            # We DO NOT save back to the file, as it would overwrite the polling list.
                         except Exception as refresh_error:
                             logging.warning(f"Failed to refresh credentials: {refresh_error}")
                     
-                    return credentials
+                    # Return the newly created/refreshed credential object for this request
+                    return request_credentials
                     
                 except Exception as parsing_error:
                     logging.warning(f"Failed to parse selected credential, attempting minimal creation. Error: {parsing_error}")
@@ -245,16 +236,15 @@ def get_credentials(allow_oauth_flow=True):
                             "token_uri": "https://oauth2.googleapis.com/token",
                         }
                         
-                        credentials = Credentials.from_authorized_user_info(minimal_creds_data, SCOPES)
+                        request_credentials = Credentials.from_authorized_user_info(minimal_creds_data, SCOPES)
                         credentials_from_env = bool(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
                         
                         logging.info("Refreshing minimal credentials...")
-                        credentials.refresh(GoogleAuthRequest())
+                        request_credentials.refresh(GoogleAuthRequest())
                         logging.info("Minimal credentials refreshed successfully.")
-                        return credentials
+                        return request_credentials
                     except Exception as minimal_error:
                         logging.error(f"Failed to create and refresh minimal credentials: {minimal_error}")
-                        # Fall through
             else:
                 logging.warning("No refresh token found in the selected credential from the polling file.")
                 
@@ -315,10 +305,9 @@ def get_credentials(allow_oauth_flow=True):
     oauthlib.oauth2.rfc6749.parameters.validate_token_parameters = patched_validate
     
     try:
-        flow.fetch_token(code=auth_code)
         credentials = flow.credentials
-        credentials_from_env = False  # This is now file-based
-        save_credentials(credentials) # This will save the new credential as a single JSON file.
+        credentials_from_env = False
+        save_credentials(credentials)
         logging.info("Authentication successful! Credentials saved.")
         return credentials
     except Exception as e:
