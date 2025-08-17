@@ -221,6 +221,7 @@ def get_user_project_id(creds):
             for acc in ACCOUNTS:
                 if acc.get("refresh_token") == creds.refresh_token:
                     if acc.get("project_id"):
+                        logging.info(f"Using project_id for this request: {project_id}")
                         return acc["project_id"]
                     # If account is found but no project_id, break to use API discovery
                     break
@@ -247,6 +248,7 @@ def get_user_project_id(creds):
             logging.info(f"Discovered project ID via API: {discovered_project_id}")
             # Save the discovered project_id back to the file for future use
             save_credentials(creds, discovered_project_id)
+            logging.info(f"Using project_id for this request: {discovered_project_id}")
             return discovered_project_id
         else:
             raise ValueError("Could not find 'cloudaicompanionProject' in loadCodeAssist response.")
