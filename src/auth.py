@@ -221,7 +221,7 @@ def get_user_project_id(creds):
             for acc in ACCOUNTS:
                 if acc.get("refresh_token") == creds.refresh_token:
                     if acc.get("project_id"):
-                        logging.info(f"Using project_id for this request: {acc["project_id"]}")
+                        logging.info(f"Using project_id for this request: {acc["project_id"]")
                         return acc["project_id"]
                     # If account is found but no project_id, break to use API discovery
                     break
