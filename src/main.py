@@ -1,5 +1,13 @@
 import logging
 import os
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s:     %(message)s",
+    stream=sys.stdout,
+    force=True  # This will override any existing handlers, ensuring our config is used
+)
+
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from .gemini_routes import router as gemini_router
