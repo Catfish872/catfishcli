@@ -9,8 +9,41 @@ license: mit
 app_port: 7860
 ---
 
-# 在原项目上添加了工具调用支持，现在可以正常解析工具列表和工具调用结果，并传递给LLM
-
+# 在原项目上添加了Google帐号轮询工具调用支持，现在可以正常解析工具列表和工具调用结果，并传递给LLM
+帐号轮询需要配置file为
+```
+[
+  {
+    "client_id": "",
+    "client_secret": "",
+    "token": "",
+    "refresh_token": "",
+    "scopes": [
+      "https://www.googleapis.com/auth/cloud-platform",
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile"
+    ],
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "expiry": "",
+    "project_id": ""
+  },
+  {
+    "client_id": "",
+    "client_secret": "",
+    "token": "",
+    "refresh_token": "",
+    "scopes": [
+      "https://www.googleapis.com/auth/cloud-platform",
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile"
+    ],
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "expiry": "",
+    "project_id": ""
+  }
+]
+```
+这样的格式
 # Gemini CLI to API Proxy (geminicli2api)
 
 A FastAPI-based proxy server that converts the Gemini CLI tool into both OpenAI-compatible and native Gemini API endpoints. This allows you to leverage Google's free Gemini API quota through familiar OpenAI API interfaces or direct Gemini API calls.
