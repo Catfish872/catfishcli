@@ -8,6 +8,7 @@ import requests
 from fastapi import Response
 from fastapi.responses import StreamingResponse
 from google.auth.transport.requests import Request as GoogleAuthRequest
+from .project_poller import get_next_project_id
 
 from .auth import get_credentials, save_credentials, get_user_project_id, onboard_user
 from .utils import get_user_agent
@@ -59,7 +60,9 @@ def send_gemini_request(payload: dict, is_streaming: bool = False) -> Response:
         )
 
     # Get project ID and onboard user
-    proj_id = get_user_project_id(creds)
+    # proj_id = get_user_project_id(creds)
+    # enable poller
+    proj_id = get_next_project_id(creds)
     if not proj_id:
         return Response(content="Failed to get user project ID.", status_code=500)
     
