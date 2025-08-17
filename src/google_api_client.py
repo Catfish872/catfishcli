@@ -63,6 +63,7 @@ def send_gemini_request(payload: dict, is_streaming: bool = False) -> Response:
     # proj_id = get_user_project_id(creds)
     # enable poller
     proj_id = get_next_project_id(creds)
+    logging.info(f"Using project_id for this request: {proj_id}")
     if not proj_id:
         return Response(content="Failed to get user project ID.", status_code=500)
     
