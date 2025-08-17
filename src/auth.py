@@ -1,3 +1,5 @@
+# /workspace/src/auth.py
+
 import os
 import json
 import base64
@@ -20,8 +22,6 @@ from .config import (
 )
 
 # --- Global State ---
-# 注意：虽然这些全局变量仍然存在，但我们修改了代码，使其在每次请求时都被重新赋值，
-# 从而避免了多进程环境下的缓存问题。
 credentials = None
 user_project_id = None
 onboarding_complete = False
@@ -140,15 +140,6 @@ def save_credentials(creds, project_id=None):
 def get_credentials(allow_oauth_flow=True):
     """Loads credentials matching gemini-cli OAuth2 flow."""
     global credentials, credentials_from_env, user_project_id
-    
-    # ==================== FIX START ====================
-    # 移除了此处的内存缓存检查。
-    # 这将强制函数在每次被调用时都从环境变量或文件中读取最新的凭证。
-    #
-    # 之前的代码:
-    # if credentials and credentials.token:
-    #     return credentials
-    # ===================== FIX END =====================
     
     # Check for credentials in environment variable (JSON string)
     env_creds_json = os.getenv("GEMINI_CREDENTIALS")
@@ -534,16 +525,6 @@ def get_user_project_id(creds):
         save_credentials(creds, user_project_id)
         return user_project_id
     
-    # ==================== FIX START ====================
-    # 移除了此处的内存缓存检查。
-    # 这将强制函数在每次被调用时都重新从文件或API中获取项目ID。
-    #
-    # 之前的代码:
-    # if user_project_id:
-    #     logging.info(f"Using cached project ID: {user_project_id}")
-    #     return user_project_id
-    # ===================== FIX END =====================
-
     # Priority 2: Check cached project ID in credential file
     if os.path.exists(CREDENTIAL_FILE):
         try:
@@ -608,4 +589,4 @@ def get_user_project_id(creds):
         raise Exception(f"Failed to discover project ID via API: {e}")
     except Exception as e:
         logging.error(f"Unexpected error during project ID discovery: {e}")
-        raise Exception(f"Failed to discover project ID: {e}")```
+        raise Exception(f"Failed to discover project ID: {e}")
