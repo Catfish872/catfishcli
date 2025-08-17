@@ -20,7 +20,6 @@ from .config import (
 )
 
 # --- Global State ---
-# 注意：虽然全局变量仍然存在，但我们已经移除了读取它们的逻辑，以解决多进程缓存问题。
 credentials = None
 user_project_id = None
 onboarding_complete = False
@@ -140,12 +139,8 @@ def get_credentials(allow_oauth_flow=True):
     """Loads credentials matching gemini-cli OAuth2 flow."""
     global credentials, credentials_from_env, user_project_id
     
-    # --- FIX START ---
-    # 移除了对全局变量 `credentials` 的缓存检查，以解决多进程问题。
-    # 这样可以强制每次请求都从文件或环境变量重新加载凭证。
     # if credentials and credentials.token:
     #     return credentials
-    # --- FIX END ---
     
     # Check for credentials in environment variable (JSON string)
     env_creds_json = os.getenv("GEMINI_CREDENTIALS")
@@ -531,13 +526,10 @@ def get_user_project_id(creds):
         save_credentials(creds, user_project_id)
         return user_project_id
     
-    # --- FIX START ---
-    # 移除了对全局变量 `user_project_id` 的缓存检查，以解决多进程问题。
-    # 这样可以强制每次请求都重新发现项目ID（如果环境变量未设置）。
+    # If we already have a cached project_id and no env var override, use it
     # if user_project_id:
     #     logging.info(f"Using cached project ID: {user_project_id}")
     #     return user_project_id
-    # --- FIX END ---
 
     # Priority 2: Check cached project ID in credential file
     if os.path.exists(CREDENTIAL_FILE):
