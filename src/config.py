@@ -40,6 +40,11 @@ DEFAULT_SAFETY_SETTINGS = [
     {"category": "HARM_CATEGORY_UNSPECIFIED", "threshold": "BLOCK_NONE"}
 ]
 
+# 读取用逗号分隔的项目ID列表字符串
+GEMINI_PROJECT_IDS_STR = os.getenv("GEMINI_PROJECT_IDS", "")
+# 解析字符串，去除空格，生成一个干净的项目ID列表
+GEMINI_PROJECT_IDS = [pid.strip() for pid in GEMINI_PROJECT_IDS_STR.split(",") if pid.strip()]
+
 # Base Models (without search variants)
 BASE_MODELS = [
     {
