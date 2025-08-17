@@ -21,6 +21,8 @@ from .config import (
 
 # --- Global State ---
 credentials = None
+polling_credentials = []  # 用于存储从文件中加载的多个凭据
+polling_index = 0         # 当前轮询到的凭据索引
 user_project_id = None
 onboarding_complete = False
 credentials_from_env = False  # Track if credentials came from environment variable
@@ -137,126 +139,64 @@ def save_credentials(creds, project_id=None):
 
 def get_credentials(allow_oauth_flow=True):
     """Loads credentials matching gemini-cli OAuth2 flow."""
-    global credentials, credentials_from_env, user_project_id
-    
-    if credentials and credentials.token:
-        return credentials
+    # 引用全局变量
+    global credentials, credentials_from_env, user_project_id, polling_credentials, polling_index
     
     # Check for credentials in environment variable (JSON string)
     env_creds_json = os.getenv("GEMINI_CREDENTIALS")
     if env_creds_json:
-        # First, check if we have a refresh token - if so, we should always be able to load credentials
         try:
-            raw_env_creds_data = json.loads(env_creds_json)
-            
-            # SAFEGUARD: If refresh_token exists, we should always load credentials successfully
-            if "refresh_token" in raw_env_creds_data and raw_env_creds_data["refresh_token"]:
-                logging.info("Environment refresh token found - ensuring credentials load successfully")
+            # 如果我们的凭据列表是空的，就尝试从环境变量加载一次
+            # 这样可以避免在程序生命周期内重复加载和解析JSON
+            if not polling_credentials:
+                creds_data = json.loads(env_creds_json)
                 
-                try:
-                    creds_data = raw_env_creds_data.copy()
-                    
-                    # Handle different credential formats
-                    if "access_token" in creds_data and "token" not in creds_data:
-                        creds_data["token"] = creds_data["access_token"]
-                    
-                    if "scope" in creds_data and "scopes" not in creds_data:
-                        creds_data["scopes"] = creds_data["scope"].split()
-                    
-                    # Handle problematic expiry formats that cause parsing errors
-                    if "expiry" in creds_data:
-                        expiry_str = creds_data["expiry"]
-                        # If expiry has timezone info that causes parsing issues, try to fix it
-                        if isinstance(expiry_str, str) and ("+00:00" in expiry_str or "Z" in expiry_str):
-                            try:
-                                # Try to parse and reformat the expiry to a format Google Credentials can handle
-                                from datetime import datetime
-                                if "+00:00" in expiry_str:
-                                    # Handle ISO format with timezone offset
-                                    parsed_expiry = datetime.fromisoformat(expiry_str)
-                                elif expiry_str.endswith("Z"):
-                                    # Handle ISO format with Z suffix
-                                    parsed_expiry = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
-                                else:
-                                    parsed_expiry = datetime.fromisoformat(expiry_str)
-                                
-                                # Convert to UTC timestamp format that Google Credentials library expects
-                                import time
-                                timestamp = parsed_expiry.timestamp()
-                                creds_data["expiry"] = datetime.utcfromtimestamp(timestamp).strftime("%Y-%m-%dT%H:%M:%SZ")
-                                logging.info(f"Converted environment expiry format from '{expiry_str}' to '{creds_data['expiry']}'")
-                            except Exception as expiry_error:
-                                logging.warning(f"Could not parse environment expiry format '{expiry_str}': {expiry_error}, removing expiry field")
-                                # Remove problematic expiry field - credentials will be treated as expired but still loadable
-                                del creds_data["expiry"]
-                    
-                    credentials = Credentials.from_authorized_user_info(creds_data, SCOPES)
-                    credentials_from_env = True  # Mark as environment credentials
+                # 防御性编程：检查加载的是否为列表（多账户轮询模式）
+                if isinstance(creds_data, list):
+                    if not creds_data:
+                        raise ValueError("GEMINI_CREDENTIALS 环境变量是一个空列表。")
+                    polling_credentials = creds_data
+                    logging.info(f"成功加载 {len(polling_credentials)} 个轮询凭据。")
+                
+                # 退回机制：如果不是列表，就当成单个凭据处理，保持原有功能
+                elif isinstance(creds_data, dict):
+                    polling_credentials = [creds_data]
+                    logging.info("检测到单个凭据，已加载以兼容模式运行。")
+                
+                else:
+                    raise ValueError("GEMINI_CREDENTIALS 格式无法识别，既不是JSON对象也不是JSON数组。")
 
-                    # Extract project_id from environment credentials if available
-                    if "project_id" in raw_env_creds_data:
-                        user_project_id = raw_env_creds_data["project_id"]
-                        logging.info(f"Extracted project_id from environment credentials: {user_project_id}")
+            # --- 轮询逻辑核心 ---
+            if polling_credentials:
+                # 1. 选择当前的凭据信息 (字典)
+                # 使用线程锁来确保索引在并发请求下是安全的
+                import threading
+                with threading.Lock():
+                    selected_cred_info = polling_credentials[polling_index]
+                    # 2. 更新索引，为下一次请求做准备
+                    polling_index = (polling_index + 1) % len(polling_credentials)
+                
+                # 3. 使用这个凭据信息创建 Credentials 对象
+                #    我们直接复用旧代码中经过验证的 `from_authorized_user_info` 逻辑
+                credentials = Credentials.from_authorized_user_info(selected_cred_info, SCOPES)
+                credentials_from_env = True
 
-                    # Try to refresh if expired and refresh token exists
-                    if credentials.expired and credentials.refresh_token:
-                        try:
-                            logging.info("Environment credentials expired, attempting refresh...")
-                            credentials.refresh(GoogleAuthRequest())
-                            logging.info("Environment credentials refreshed successfully")
-                        except Exception as refresh_error:
-                            logging.warning(f"Failed to refresh environment credentials: {refresh_error}")
-                            logging.info("Using existing environment credentials despite refresh failure")
-                    elif not credentials.expired:
-                        logging.info("Environment credentials are still valid, no refresh needed")
-                    elif not credentials.refresh_token:
-                        logging.warning("Environment credentials expired but no refresh token available")
-                    
-                    return credentials
-                    
-                except Exception as parsing_error:
-                    # SAFEGUARD: Even if parsing fails, try to create minimal credentials with refresh token
-                    logging.warning(f"Failed to parse environment credentials normally: {parsing_error}")
-                    logging.info("Attempting to create minimal environment credentials with refresh token")
-                    
+                # 4. 检查并刷新令牌 (同样复用旧代码的健壮逻辑)
+                if credentials.expired and credentials.refresh_token:
                     try:
-                        minimal_creds_data = {
-                            "client_id": raw_env_creds_data.get("client_id", CLIENT_ID),
-                            "client_secret": raw_env_creds_data.get("client_secret", CLIENT_SECRET),
-                            "refresh_token": raw_env_creds_data["refresh_token"],
-                            "token_uri": "https://oauth2.googleapis.com/token",
-                        }
-                        
-                        credentials = Credentials.from_authorized_user_info(minimal_creds_data, SCOPES)
-                        credentials_from_env = True  # Mark as environment credentials
-                        
-                        # Extract project_id from environment credentials if available
-                        if "project_id" in raw_env_creds_data:
-                            user_project_id = raw_env_creds_data["project_id"]
-                            logging.info(f"Extracted project_id from minimal environment credentials: {user_project_id}")
-                        
-                        # Force refresh since we don't have a valid token
-                        try:
-                            logging.info("Refreshing minimal environment credentials...")
-                            credentials.refresh(GoogleAuthRequest())
-                            logging.info("Minimal environment credentials refreshed successfully")
-                            return credentials
-                        except Exception as refresh_error:
-                            logging.error(f"Failed to refresh minimal environment credentials: {refresh_error}")
-                            # Even if refresh fails, return the credentials - they might still work
-                            return credentials
-                            
-                    except Exception as minimal_error:
-                        logging.error(f"Failed to create minimal environment credentials: {minimal_error}")
-                        # Fall through to file-based credentials
-            else:
-                logging.warning("No refresh token found in environment credentials")
-                # Fall through to file-based credentials
+                        current_cred_index = (polling_index - 1 + len(polling_credentials)) % len(polling_credentials)
+                        logging.info(f"凭据索引 {current_cred_index} 已过期，尝试刷新...")
+                        credentials.refresh(GoogleAuthRequest())
+                        logging.info(f"凭据索引 {current_cred_index} 刷新成功。")
+                    except Exception as refresh_error:
+                        logging.warning(f"刷新凭据失败: {refresh_error}")
                 
-        except Exception as e:
-            logging.error(f"Failed to parse environment credentials JSON: {e}")
-            # Fall through to file-based credentials
-    
+                return credentials
+
+        except (json.JSONDecodeError, ValueError) as e:
+            logging.error(f"处理 GEMINI_CREDENTIALS 环境变量时出错: {e}")
+            # 如果出错，就继续往下走，尝试文件或其他方法，保持健壮性
+
     # Check for credentials file (CREDENTIAL_FILE now includes GOOGLE_APPLICATION_CREDENTIALS path if set)
     if os.path.exists(CREDENTIAL_FILE):
         # First, check if we have a refresh token - if so, we should always be able to load credentials
@@ -382,7 +322,7 @@ def get_credentials(allow_oauth_flow=True):
     flow = Flow.from_client_config(
         client_config,
         scopes=SCOPES,
-        redirect_uri="http://localhost:8080"
+        redirect_uri="http://localhost:8989"
     )
     
     flow.oauth2session.scope = SCOPES
@@ -400,7 +340,7 @@ def get_credentials(allow_oauth_flow=True):
     print(f"{'='*80}\n")
     logging.info(f"Please open this URL in your browser to log in: {auth_url}")
     
-    server = HTTPServer(("", 8080), _OAuthCallbackHandler)
+    server = HTTPServer(("", 8989), _OAuthCallbackHandler)
     server.handle_request()
     
     auth_code = _OAuthCallbackHandler.auth_code
@@ -409,6 +349,27 @@ def get_credentials(allow_oauth_flow=True):
 
     import oauthlib.oauth2.rfc6749.parameters
     original_validate = oauthlib.oauth2.rfc6749.parameters.validate_token_parameters
+    
+    def patched_validate(params):
+        try:
+            return original_validate(params)
+        except Warning:
+            pass
+    
+    oauthlib.oauth2.rfc6749.parameters.validate_token_parameters = patched_validate
+    
+    try:
+        flow.fetch_token(code=auth_code)
+        credentials = flow.credentials
+        credentials_from_env = False  # Mark as file-based credentials
+        save_credentials(credentials)
+        logging.info("Authentication successful! Credentials saved.")
+        return credentials
+    except Exception as e:
+        logging.error(f"Authentication failed: {e}")
+        return None
+    finally:
+        oauthlib.oauth2.rfc6749.parameters.validate_token_parameters = original_validate
     
     def patched_validate(params):
         try:
