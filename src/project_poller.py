@@ -26,7 +26,7 @@ def get_next_project_id(credentials) -> str:
         
         # 从列表中获取当前索引对应的项目ID
         project_id = GEMINI_PROJECT_IDS[_project_index]
-        
+        print(f"Polling in action: Using project ID '{project_id}' at index {_project_index}")
         # 更新索引，让它指向下一个项目ID，如果到了末尾则回到开头
         _project_index = (_project_index + 1) % len(GEMINI_PROJECT_IDS)
         
