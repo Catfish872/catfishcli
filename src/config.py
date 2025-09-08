@@ -45,6 +45,7 @@ DEFAULT_SAFETY_SETTINGS = [
 GEMINI_PROJECT_IDS_STR = os.getenv("GEMINI_PROJECT_IDS", "")
 # 解析字符串，去除空格，生成一个干净的项目ID列表
 GEMINI_PROJECT_IDS = [pid.strip() for pid in GEMINI_PROJECT_IDS_STR.split(",") if pid.strip()]
+GEMINI_RETRY_COUNT = int(os.getenv("GEMINI_RETRY_COUNT", "5"))
 
 # Base Models (without search variants)
 BASE_MODELS = [
