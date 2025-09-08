@@ -9,6 +9,7 @@ from fastapi import Response
 from fastapi.responses import StreamingResponse
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from .project_poller import get_next_project_id
+from .config import GEMINI_RETRY_COUNT
 
 from .auth import get_credentials, save_credentials, get_user_project_id, onboard_user
 from .utils import get_user_agent
@@ -25,7 +26,7 @@ import asyncio
 
 def send_gemini_request(payload: dict, is_streaming: bool = False) -> Response:
     """
-    Send a request to Google's Gemini API.
+    Send a request to Google's Gemini API with retry and project polling logic.
     
     Args:
         payload: The request payload in Gemini format
@@ -42,7 +43,6 @@ def send_gemini_request(payload: dict, is_streaming: bool = False) -> Response:
             status_code=500
         )
     
-
     # Refresh credentials if needed
     if creds.expired and creds.refresh_token:
         try:
@@ -59,58 +59,111 @@ def send_gemini_request(payload: dict, is_streaming: bool = False) -> Response:
             status_code=500
         )
 
-    # Get project ID and onboard user
-    # proj_id = get_user_project_id(creds)
-    # enable poller
-    proj_id = get_next_project_id(creds)
-    logging.info(f"Using project_id for this request: {proj_id}")
-    if not proj_id:
-        return Response(content="Failed to get user project ID.", status_code=500)
-    
-    onboard_user(creds, proj_id)
+    last_error_response = None
 
-    # Build the final payload with project info
-    final_payload = {
-        "model": payload.get("model"),
-        "project": proj_id,
-        "request": payload.get("request", {})
-    }
+    # Total attempts = 1 (initial) + GEMINI_RETRY_COUNT
+    for attempt in range(GEMINI_RETRY_COUNT + 1):
+        # Get next project ID for each attempt
+        proj_id = get_next_project_id(creds)
+        logging.info(f"Attempt {attempt + 1}/{GEMINI_RETRY_COUNT + 1}: Using project_id for this request: {proj_id}")
+        if not proj_id:
+            logging.error("Failed to get a valid user project ID for this attempt.")
+            continue # Try next project ID
 
-    # Determine the action and URL
-    action = "streamGenerateContent" if is_streaming else "generateContent"
-    target_url = f"{CODE_ASSIST_ENDPOINT}/v1internal:{action}"
-    if is_streaming:
-        target_url += "?alt=sse"
+        onboard_user(creds, proj_id)
 
-    # Build request headers
-    request_headers = {
-        "Authorization": f"Bearer {creds.token}",
-        "Content-Type": "application/json",
-        "User-Agent": get_user_agent(),
-    }
+        # Build the final payload with the current project info
+        final_payload = {
+            "model": payload.get("model"),
+            "project": proj_id,
+            "request": payload.get("request", {})
+        }
+        final_post_data = json.dumps(final_payload)
 
-    final_post_data = json.dumps(final_payload)
-
-    # Send the request
-    try:
+        # Determine the action and URL
+        action = "streamGenerateContent" if is_streaming else "generateContent"
+        target_url = f"{CODE_ASSIST_ENDPOINT}/v1internal:{action}"
         if is_streaming:
-            resp = requests.post(target_url, data=final_post_data, headers=request_headers, stream=True)
-            return _handle_streaming_response(resp)
-        else:
-            resp = requests.post(target_url, data=final_post_data, headers=request_headers)
-            return _handle_non_streaming_response(resp)
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Request to Google API failed: {str(e)}")
+            target_url += "?alt=sse"
+
+        # Build request headers
+        request_headers = {
+            "Authorization": f"Bearer {creds.token}",
+            "Content-Type": "application/json",
+            "User-Agent": get_user_agent(),
+        }
+
+        try:
+            if is_streaming:
+                resp = requests.post(target_url, data=final_post_data, headers=request_headers, stream=True)
+            else:
+                resp = requests.post(target_url, data=final_post_data, headers=request_headers)
+
+            # Check for retry conditions
+            is_429 = resp.status_code == 429
+            is_empty_reply = False
+            
+            # Check for empty reply only on non-streaming, successful requests
+            if not is_streaming and resp.status_code == 200:
+                try:
+                    # Peek into the response content to check if it's effectively empty
+                    resp_text = resp.text
+                    if resp_text.startswith('data: '):
+                        resp_text = resp_text[len('data: '):]
+                    
+                    if not resp_text.strip():
+                        is_empty_reply = True
+                    else:
+                        api_response = json.loads(resp_text)
+                        gemini_response = api_response.get("response", {})
+                        candidates = gemini_response.get("candidates", [])
+                        
+                        if candidates:
+                            parts = candidates[0].get("content", {}).get("parts", [])
+                            has_content = any("text" in p and p["text"] for p in parts)
+                            has_tool_call = any("functionCall" in p for p in parts)
+                            if not has_content and not has_tool_call:
+                                is_empty_reply = True
+                        else:
+                             is_empty_reply = True
+
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    pass # Not an empty reply if parsing fails, let the handler manage it.
+
+            if is_429 or is_empty_reply:
+                reason = "status 429" if is_429 else "empty reply"
+                logging.warning(f"Attempt {attempt + 1} failed due to {reason}. Retrying...")
+                last_error_response = resp
+                if attempt < GEMINI_RETRY_COUNT:
+                    continue
+                else:
+                    break # Last attempt failed, break to return error
+
+            # If successful, handle and return immediately
+            if is_streaming:
+                return _handle_streaming_response(resp)
+            else:
+                return _handle_non_streaming_response(resp)
+
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Request to Google API failed on attempt {attempt + 1}: {str(e)}")
+            error_content = json.dumps({"error": {"message": f"Request failed: {str(e)}", "type": "api_connection_error"}})
+            last_error_response = Response(content=error_content, status_code=502, media_type="application/json")
+            if attempt < GEMINI_RETRY_COUNT:
+                continue
+            else:
+                break
+    
+    # If the loop finishes without a successful return, all retries have failed.
+    logging.error("All retry attempts failed.")
+    if last_error_response:
+        # Return the last captured error response
+        return _handle_non_streaming_response(last_error_response)
+    else:
+        # Fallback error if no response was ever received
         return Response(
-            content=json.dumps({"error": {"message": f"Request failed: {str(e)}"}}),
-            status_code=500,
-            media_type="application/json"
-        )
-    except Exception as e:
-        logging.error(f"Unexpected error during Google API request: {str(e)}")
-        return Response(
-            content=json.dumps({"error": {"message": f"Unexpected error: {str(e)}"}}),
-            status_code=500,
+            content=json.dumps({"error": {"message": "All retry attempts failed to connect to the upstream server."}}),
+            status_code=503,
             media_type="application/json"
         )
 
