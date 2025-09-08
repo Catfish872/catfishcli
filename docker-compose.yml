@@ -11,6 +11,8 @@ services:
     environment:
       - GEMINI_AUTH_PASSWORD=your_password_here（改成你要用的key）
       - GOOGLE_APPLICATION_CREDENTIALS=/app/oauth_creds.json
+      # 首次请求失败后的重试次数。设置为5意味着总共会尝试 1+5=6 次
+      - GEMINI_RETRY_COUNT=5
       - PORT=8888
       - HOST=0.0.0.0
     healthcheck:
