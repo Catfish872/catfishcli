@@ -120,15 +120,21 @@ def send_gemini_request(payload: dict, is_streaming: bool = False) -> Response:
                         
                         if candidates:
                             parts = candidates[0].get("content", {}).get("parts", [])
-                            has_content = any("text" in p and p["text"] for p in parts)
+                            # 判定为有 "正文" 的条件：part 中有 text 字段，但没有 thought 字段。
+                            has_main_text = any("text" in p and not p.get("thought") for p in parts)
+                            # 判定为有 "工具调用" 的条件 (逻辑不变)
                             has_tool_call = any("functionCall" in p for p in parts)
-                            if not has_content and not has_tool_call:
+                            
+                            # 只有在既没有正文，也没有工具调用的情况下，才视为空回复。
+                            if not has_main_text and not has_tool_call:
                                 is_empty_reply = True
+                            # ==========================================================
                         else:
+                             # 如果连 candidates 都没有，肯定是空回复
                              is_empty_reply = True
 
                 except (json.JSONDecodeError, KeyError, IndexError):
-                    pass # Not an empty reply if parsing fails, let the handler manage it.
+                    pass # 如果JSON解析失败或结构不完整，不视为空回复，让后续的处理器正常报错。
 
             if is_429 or is_empty_reply:
                 reason = "status 429" if is_429 else "empty reply"
