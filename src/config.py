@@ -63,6 +63,32 @@ BASE_MODELS = [
         "topK": 64
     },
     {
+        "name": "models/gemini-flash-latest",
+        "version": "001",
+        "displayName": "gemini-flash-latest",
+        "description": "gemini-flash-latest",
+        "inputTokenLimit": 1048576,
+        "outputTokenLimit": 65535,
+        "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
+        "temperature": 1.0,
+        "maxTemperature": 2.0,
+        "topP": 0.95,
+        "topK": 64
+    },
+    {
+        "name": "models/gemini-3-pro-preview-11-2025",
+        "version": "001",
+        "displayName": "gemini-3-pro-preview-11-2025",
+        "description": "gemini-3-pro-preview-11-2025",
+        "inputTokenLimit": 1048576,
+        "outputTokenLimit": 65535,
+        "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
+        "temperature": 1.0,
+        "maxTemperature": 2.0,
+        "topP": 0.95,
+        "topK": 64
+    },
+    {
         "name": "models/gemini-2.5-pro-preview-06-05",
         "version": "001",
         "displayName": "Gemini 2.5 Pro Preview 06-05",
