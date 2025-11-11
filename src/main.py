@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .gemini_routes import router as gemini_router
 from .openai_routes import router as openai_router
 from .auth import get_credentials, get_user_project_id, onboard_user
+from .google_api_client import get_formatted_stats
 
 # Load environment variables from .env file
 try:
@@ -126,6 +127,7 @@ async def root():
         "description": "OpenAI-compatible API proxy for Google's Gemini models via gemini-cli",
         "purpose": "Provides both OpenAI-compatible endpoints (/v1/chat/completions) and native Gemini API endpoints for accessing Google's Gemini models",
         "version": "1.0.0",
+        "daily_usage_stats": get_formatted_stats(),  # 添加统计报告
         "endpoints": {
             "openai_compatible": {
                 "chat_completions": "/v1/chat/completions",
