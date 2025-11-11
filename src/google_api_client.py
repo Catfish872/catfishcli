@@ -22,53 +22,145 @@ from .config import (
     should_include_thoughts
 )
 import asyncio
+from datetime import date
+import threading
+
+# 使用全局字典在内存中存储统计信息
+usage_stats = {
+    "last_reset_date": date.today(),
+    "total_success": 0,
+    "total_fail": 0,
+    "accounts": {}  # key: project_id, value: {"success": 0, "fail": 0}
+}
+# 线程锁，用于保证并发请求时数据更新的原子性
+stats_lock = threading.Lock()
+
+
+def _check_and_reset_stats():
+    """检查日期，如果到了新的一天，则重置所有计数器。必须在锁内调用。"""
+    global usage_stats
+    today = date.today()
+    if usage_stats["last_reset_date"] != today:
+        logging.info(f"New day detected. Resetting usage statistics from {usage_stats['last_reset_date']} to {today}.")
+        usage_stats = {
+            "last_reset_date": today,
+            "total_success": 0,
+            "total_fail": 0,
+            "accounts": {}
+        }
+
+
+def record_usage(project_id: str, success: bool):
+    """记录一次API调用（成功或失败）。这是一个线程安全的函数。"""
+    if not project_id:  # 防止 project_id 为 None 时出错
+        project_id = "unknown_project"
+    with stats_lock:
+        _check_and_reset_stats()
+        usage_stats["accounts"].setdefault(project_id, {"success": 0, "fail": 0})
+
+        if success:
+            usage_stats["total_success"] += 1
+            usage_stats["accounts"][project_id]["success"] += 1
+        else:
+            usage_stats["total_fail"] += 1
+            usage_stats["accounts"][project_id]["fail"] += 1
+
+
+def get_formatted_stats() -> str:
+    """获取格式化为文本表格的统计信息字符串。这是一个线程安全的函数。"""
+    with stats_lock:
+        _check_and_reset_stats()
+        stats_copy = usage_stats.copy()
+        accounts_copy = stats_copy["accounts"].copy()
+
+    header = (
+        f"--- Daily Usage Statistics (Last Reset: {stats_copy['last_reset_date']}) ---\n"
+        f"Overall: {stats_copy['total_success']} Success, {stats_copy['total_fail']} Fail\n"
+        f"{'-' * 60}\n"
+        f"| {'Project ID'.ljust(35)} | {'Success'.rjust(7)} | {'Fail'.rjust(7)} |\n"
+        f"|{'-' * 37}|{'-' * 9}|{'-' * 9}|\n"
+    )
+
+    body = ""
+    if not accounts_copy:
+        body = "| No account usage recorded today.                                  |\n"
+    else:
+        for project_id, counts in sorted(accounts_copy.items()):
+            body += f"| {str(project_id).ljust(35)} | {str(counts['success']).rjust(7)} | {str(counts['fail']).rjust(7)} |\n"
+
+    footer = f"{'-' * 60}"
+    return header + body + footer
 
 
 def send_gemini_request(payload: dict, is_streaming: bool = False) -> Response:
     """
     Send a request to Google's Gemini API with retry and project polling logic.
-    
+
     Args:
         payload: The request payload in Gemini format
         is_streaming: Whether this is a streaming request
-        
+
     Returns:
         FastAPI Response object
     """
-    # Get and validate credentials
-    creds = get_credentials()
-    if not creds:
-        return Response(
-            content="Authentication failed. Please restart the proxy to log in.", 
-            status_code=500
-        )
-    
-    # Refresh credentials if needed
-    if creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(GoogleAuthRequest())
-            save_credentials(creds)
-        except Exception as e:
-            return Response(
-                content="Token refresh failed. Please restart the proxy to re-authenticate.", 
-                status_code=500
-            )
-    elif not creds.token:
-        return Response(
-            content="No access token. Please restart the proxy to re-authenticate.", 
-            status_code=500
-        )
-
+    # ===================== MODIFY START =====================
     last_error_response = None
+    last_used_proj_id = None  # 用于在最终失败时记录
 
     # Total attempts = 1 (initial) + GEMINI_RETRY_COUNT
     for attempt in range(GEMINI_RETRY_COUNT + 1):
-        # Get next project ID for each attempt
-        proj_id = get_next_project_id(creds)
-        logging.info(f"Attempt {attempt + 1}/{GEMINI_RETRY_COUNT + 1}: Using project_id for this request: {proj_id}")
+        # 功能一：每次重试都获取一个新账号凭据
+        creds = get_credentials()
+        if not creds:
+            logging.error(f"Attempt {attempt + 1}: Failed to get credentials.")
+            if attempt < GEMINI_RETRY_COUNT:
+                continue
+            else:
+                last_error_response = Response(
+                    content="Authentication failed. Could not retrieve any valid credentials.",
+                    status_code=500
+                )
+                break
+
+        # Refresh credentials if needed
+        if creds.expired and creds.refresh_token:
+            try:
+                creds.refresh(GoogleAuthRequest())
+                save_credentials(creds)
+            except Exception as e:
+                logging.warning(f"Attempt {attempt + 1}: Token refresh failed for an account. Trying next. Error: {e}")
+                if attempt < GEMINI_RETRY_COUNT:
+                    continue
+                else:
+                    last_error_response = Response(
+                        content="Token refresh failed. Please restart the proxy to re-authenticate.",
+                        status_code=500
+                    )
+                    break
+        elif not creds.token:
+            logging.warning(f"Attempt {attempt + 1}: Account has no access token. Trying next one.")
+            if attempt < GEMINI_RETRY_COUNT:
+                continue
+            else:
+                last_error_response = Response(
+                    content="No access token. Please restart the proxy to re-authenticate.",
+                    status_code=500
+                )
+                break
+
+        # 使用与凭据绑定的项目ID，而不是轮询独立的列表
+        proj_id = get_user_project_id(creds)
+        last_used_proj_id = proj_id
+
+        logging.info(f"Attempt {attempt + 1}/{GEMINI_RETRY_COUNT + 1}: Using account for project: {proj_id}")
         if not proj_id:
             logging.error("Failed to get a valid user project ID for this attempt.")
-            continue # Try next project ID
+            if attempt < GEMINI_RETRY_COUNT:
+                continue  # 尝试下一个账号
+            else:
+                last_error_response = Response(content="Could not determine project ID for any account.",
+                                               status_code=500)
+                break
 
         onboard_user(creds, proj_id)
 
@@ -102,7 +194,7 @@ def send_gemini_request(payload: dict, is_streaming: bool = False) -> Response:
             # Check for retry conditions
             is_429 = resp.status_code == 429
             is_empty_reply = False
-            
+
             # Check for empty reply only on non-streaming, successful requests
             if not is_streaming and resp.status_code == 200:
                 try:
@@ -110,31 +202,26 @@ def send_gemini_request(payload: dict, is_streaming: bool = False) -> Response:
                     resp_text = resp.text
                     if resp_text.startswith('data: '):
                         resp_text = resp_text[len('data: '):]
-                    
+
                     if not resp_text.strip():
                         is_empty_reply = True
                     else:
                         api_response = json.loads(resp_text)
                         gemini_response = api_response.get("response", {})
                         candidates = gemini_response.get("candidates", [])
-                        
+
                         if candidates:
                             parts = candidates[0].get("content", {}).get("parts", [])
-                            # 判定为有 "正文" 的条件：part 中有 text 字段，但没有 thought 字段。
                             has_main_text = any("text" in p and not p.get("thought") for p in parts)
-                            # 判定为有 "工具调用" 的条件 (逻辑不变)
                             has_tool_call = any("functionCall" in p for p in parts)
-                            
-                            # 只有在既没有正文，也没有工具调用的情况下，才视为空回复。
+
                             if not has_main_text and not has_tool_call:
                                 is_empty_reply = True
-                            # ==========================================================
                         else:
-                             # 如果连 candidates 都没有，肯定是空回复
-                             is_empty_reply = True
+                            is_empty_reply = True
 
                 except (json.JSONDecodeError, KeyError, IndexError):
-                    pass # 如果JSON解析失败或结构不完整，不视为空回复，让后续的处理器正常报错。
+                    pass
 
             if is_429 or is_empty_reply:
                 reason = "status 429" if is_429 else "empty reply"
@@ -143,9 +230,11 @@ def send_gemini_request(payload: dict, is_streaming: bool = False) -> Response:
                 if attempt < GEMINI_RETRY_COUNT:
                     continue
                 else:
-                    break # Last attempt failed, break to return error
+                    break
 
-            # If successful, handle and return immediately
+                    # If successful, handle and return immediately
+            # 功能二：记录成功调用
+            record_usage(proj_id, success=True)
             if is_streaming:
                 return _handle_streaming_response(resp)
             else:
@@ -153,15 +242,19 @@ def send_gemini_request(payload: dict, is_streaming: bool = False) -> Response:
 
         except requests.exceptions.RequestException as e:
             logging.error(f"Request to Google API failed on attempt {attempt + 1}: {str(e)}")
-            error_content = json.dumps({"error": {"message": f"Request failed: {str(e)}", "type": "api_connection_error"}})
+            error_content = json.dumps(
+                {"error": {"message": f"Request failed: {str(e)}", "type": "api_connection_error"}})
             last_error_response = Response(content=error_content, status_code=502, media_type="application/json")
             if attempt < GEMINI_RETRY_COUNT:
                 continue
             else:
                 break
-    
+
     # If the loop finishes without a successful return, all retries have failed.
     logging.error("All retry attempts failed.")
+    # 功能二：记录失败调用
+    record_usage(last_used_proj_id, success=False)
+
     if last_error_response:
         # Return the last captured error response
         return _handle_non_streaming_response(last_error_response)
