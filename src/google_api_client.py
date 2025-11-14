@@ -193,6 +193,7 @@ def send_gemini_request(payload: dict, is_streaming: bool = False) -> Response:
 
             # Check for retry conditions
             is_429 = resp.status_code == 429
+            is_403 = resp.status_code == 403  # <-- 新增此行
             is_empty_reply = False
 
             # Check for empty reply only on non-streaming, successful requests
@@ -223,8 +224,8 @@ def send_gemini_request(payload: dict, is_streaming: bool = False) -> Response:
                 except (json.JSONDecodeError, KeyError, IndexError):
                     pass
 
-            if is_429 or is_empty_reply:
-                reason = "status 429" if is_429 else "empty reply"
+            if is_429 or is_403 or is_empty_reply:  # <-- 修改此行 (增加 is_403)
+                reason = "status 429" if is_429 else ("status 403" if is_403 else "empty reply")  # <-- 修改此行
                 logging.warning(f"Attempt {attempt + 1} failed due to {reason}. Retrying...")
                 last_error_response = resp
                 if attempt < GEMINI_RETRY_COUNT:
