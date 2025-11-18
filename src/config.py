@@ -76,10 +76,10 @@ BASE_MODELS = [
         "topK": 64
     },
     {
-        "name": "models/gemini-3-pro-preview-11-2025",
+        "name": "models/gemini-3-pro-preview",
         "version": "001",
-        "displayName": "gemini-3-pro-preview-11-2025",
-        "description": "gemini-3-pro-preview-11-2025",
+        "displayName": "gemini-3-pro-preview",
+        "description": "gemini-3-pro-preview",
         "inputTokenLimit": 1048576,
         "outputTokenLimit": 65535,
         "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
