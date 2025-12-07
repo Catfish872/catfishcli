@@ -177,15 +177,16 @@ def _generate_thinking_variants():
         # Only add thinking variants for models that support content generation
         # and contain "gemini-2.5-flash" or "gemini-2.5-pro" in their name
         if ("generateContent" in model["supportedGenerationMethods"] and
-            ("gemini-2.5-flash" in model["name"] or "gemini-2.5-pro" in model["name"])):
-            
+            ("gemini-2.5-flash" in model["name"] or "gemini-2.5-pro" in model["name"] or
+             "gemini-3-pro" in model["name"])):
+
             # Add -nothinking variant
             nothinking_variant = model.copy()
             nothinking_variant["name"] = model["name"] + "-nothinking"
             nothinking_variant["displayName"] = model["displayName"] + " (No Thinking)"
             nothinking_variant["description"] = model["description"] + " (thinking disabled)"
             thinking_models.append(nothinking_variant)
-            
+
             # Add -maxthinking variant
             maxthinking_variant = model.copy()
             maxthinking_variant["name"] = model["name"] + "-maxthinking"
@@ -202,15 +203,16 @@ def _generate_combined_variants():
         # Only add combined variants for models that support content generation
         # and contain "gemini-2.5-flash" or "gemini-2.5-pro" in their name
         if ("generateContent" in model["supportedGenerationMethods"] and
-            ("gemini-2.5-flash" in model["name"] or "gemini-2.5-pro" in model["name"])):
-            
+            ("gemini-2.5-flash" in model["name"] or "gemini-2.5-pro" in model["name"] or
+             "gemini-3-pro" in model["name"])):
+
             # search + nothinking
             search_nothinking = model.copy()
             search_nothinking["name"] = model["name"] + "-search-nothinking"
             search_nothinking["displayName"] = model["displayName"] + " with Google Search (No Thinking)"
             search_nothinking["description"] = model["description"] + " (includes Google Search grounding, thinking disabled)"
             combined_models.append(search_nothinking)
-            
+
             # search + maxthinking
             search_maxthinking = model.copy()
             search_maxthinking["name"] = model["name"] + "-search-maxthinking"
@@ -253,16 +255,16 @@ def is_maxthinking_model(model_name):
 def get_thinking_budget(model_name):
     """Get the appropriate thinking budget for a model based on its name and variant."""
     base_model = get_base_model_name(model_name)
-    
+
     if is_nothinking_model(model_name):
         if "gemini-2.5-flash" in base_model:
             return 0  # No thinking for flash
-        elif "gemini-2.5-pro" in base_model:
+        elif "gemini-2.5-pro" in base_model or "gemini-3-pro" in base_model:
             return 512  # Limited thinking for pro
     elif is_maxthinking_model(model_name):
         if "gemini-2.5-flash" in base_model:
             return 24576
-        elif "gemini-2.5-pro" in base_model:
+        elif "gemini-2.5-pro" in base_model or "gemini-3-pro" in base_model:
             return 32768
     else:
         # Default thinking budget for regular models
@@ -274,7 +276,7 @@ def should_include_thoughts(model_name):
     if is_nothinking_model(model_name):
         # For nothinking mode, still include thoughts if it's a pro model
         base_model = get_base_model_name(model_name)
-        return "gemini-2.5-pro" in base_model
+        return "gemini-2.5-pro" in base_model or "gemini-3-pro" in base_model
     else:
         # For all other modes, include thoughts
         return True
