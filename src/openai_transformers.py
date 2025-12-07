@@ -25,7 +25,9 @@ def openai_request_to_gemini(openai_request: OpenAIChatCompletionRequest) -> Dic
     此版本经过修正，可正确处理所有消息角色，特别是 'tool' 角色。
     """
     contents = []
-    
+    model_name = openai_request.model.lower()
+    # 判断是否为需要强制签名的 Gemini 3.0 系列模型
+    is_gemini_3 = "gemini-3" in model_name
     # ------------------------------------------------------------------
     #  1. 转换对话历史 (messages)
     #     这是经过修正的核心逻辑
@@ -69,13 +71,16 @@ def openai_request_to_gemini(openai_request: OpenAIChatCompletionRequest) -> Dic
             parts = []
             if message.tool_calls:
                 for tc in message.tool_calls:
-                    parts.append({
+                    func_call_part = {
                         "functionCall": {
                             "name": tc.get("function", {}).get("name"),
                             "args": json.loads(tc.get("function", {}).get("arguments", "{}"))
-                        },
-                        "thoughtSignature": "skip_thought_signature_validator"
-                    })
+                        }
+                    }
+                    if is_gemini_3:
+                        func_call_part["thoughtSignature"] = "skip_thought_signature_validator"
+
+                    parts.append(func_call_part)
             if message.content:
                 parts.append({"text": str(message.content)})
             
