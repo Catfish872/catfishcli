@@ -81,32 +81,71 @@ def openai_request_to_gemini(openai_request: OpenAIChatCompletionRequest) -> Dic
             
             if parts:
                 contents.append({"role": "model", "parts": parts})
-
         elif role == "tool":
+
             # 这是修复 400 错误的关键：将 'tool' 消息伪装成 'user' 消息
+
+            # 并且处理并行工具调用（Parallel Function Calling）的合并逻辑
+
             func_name = message.name
+
             if not func_name:
+
                 # 如果客户端没有在 tool message 中提供 name，我们必须回溯查找
-                # 这是保证功能完整的必要逻辑
+
                 for i in range(len(openai_request.messages) - 1, -1, -1):
+
                     prev_msg = openai_request.messages[i]
+
                     if prev_msg.role == "assistant" and prev_msg.tool_calls:
+
                         for tc in prev_msg.tool_calls:
+
                             if tc.get("id") == message.tool_call_id:
                                 func_name = tc.get("function", {}).get("name")
+
                                 break
+
                     if func_name:
                         break
-            
-            contents.append({
-                "role": "user", # 核心修改：将 'tool' 伪装成 'user'
-                "parts": [{
-                    "functionResponse": {
-                        "name": func_name or "function_name_not_found",
-                        "response": {"content": message.content}
-                    }
-                }]
-            })
+
+            # 构建新的 part
+
+            new_part = {
+
+                "functionResponse": {
+
+                    "name": func_name or "function_name_not_found",
+
+                    "response": {"content": message.content}
+
+                }
+
+            }
+
+            # 核心修改：检查上一条消息是否也是 functionResponse 类型的 user 消息
+
+            # 如果是，则合并到上一条消息的 parts 中，而不是创建新的消息
+
+            if (contents and
+
+                    contents[-1]["role"] == "user" and
+
+                    "parts" in contents[-1] and
+
+                    len(contents[-1]["parts"]) > 0 and
+
+                    "functionResponse" in contents[-1]["parts"][-1]):
+
+                contents[-1]["parts"].append(new_part)
+            else:
+                contents.append({
+
+                    "role": "user",
+
+                    "parts": [new_part]
+
+                })
 
     # ------------------------------------------------------------------
     #  2. 转换 API 参数 (这部分逻辑保持不变)
