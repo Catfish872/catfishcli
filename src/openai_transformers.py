@@ -73,7 +73,8 @@ def openai_request_to_gemini(openai_request: OpenAIChatCompletionRequest) -> Dic
                         "functionCall": {
                             "name": tc.get("function", {}).get("name"),
                             "args": json.loads(tc.get("function", {}).get("arguments", "{}"))
-                        }
+                        },
+                        "thoughtSignature": "skip_thought_signature_validator"
                     })
             if message.content:
                 parts.append({"text": str(message.content)})
