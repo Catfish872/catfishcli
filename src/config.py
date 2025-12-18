@@ -62,6 +62,19 @@ BASE_MODELS = [
         "topP": 0.95,
         "topK": 64
     },
+{
+        "name": "models/gemini-3-flash-preview",
+        "version": "001",
+        "displayName": "Gemini 3 Flash Preview",
+        "description": "Preview version of Gemini 3 Flash model",
+        "inputTokenLimit": 1048576,
+        "outputTokenLimit": 65535,
+        "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
+        "temperature": 1.0,
+        "maxTemperature": 2.0,
+        "topP": 0.95,
+        "topK": 64
+    },
     {
         "name": "models/gemini-flash-latest",
         "version": "001",
@@ -178,7 +191,8 @@ def _generate_thinking_variants():
         # and contain "gemini-2.5-flash" or "gemini-2.5-pro" in their name
         if ("generateContent" in model["supportedGenerationMethods"] and
             ("gemini-2.5-flash" in model["name"] or "gemini-2.5-pro" in model["name"] or
-             "gemini-3-pro" in model["name"])):
+             "gemini-3-pro" in model["name"] or
+             "gemini-3-flash" in model["name"])):
 
             # Add -nothinking variant
             nothinking_variant = model.copy()
@@ -204,7 +218,8 @@ def _generate_combined_variants():
         # and contain "gemini-2.5-flash" or "gemini-2.5-pro" in their name
         if ("generateContent" in model["supportedGenerationMethods"] and
             ("gemini-2.5-flash" in model["name"] or "gemini-2.5-pro" in model["name"] or
-             "gemini-3-pro" in model["name"])):
+             "gemini-3-pro" in model["name"] or
+             "gemini-3-flash" in model["name"])):
 
             # search + nothinking
             search_nothinking = model.copy()
@@ -257,12 +272,12 @@ def get_thinking_budget(model_name):
     base_model = get_base_model_name(model_name)
 
     if is_nothinking_model(model_name):
-        if "gemini-2.5-flash" in base_model:
+        if "gemini-2.5-flash" in base_model or "gemini-3-flash" in base_model:
             return 0  # No thinking for flash
         elif "gemini-2.5-pro" in base_model or "gemini-3-pro" in base_model:
             return 512  # Limited thinking for pro
     elif is_maxthinking_model(model_name):
-        if "gemini-2.5-flash" in base_model:
+        if "gemini-2.5-flash" in base_model or "gemini-3-flash" in base_model:
             return 24576
         elif "gemini-2.5-pro" in base_model or "gemini-3-pro" in base_model:
             return 32768
