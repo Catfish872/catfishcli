@@ -140,7 +140,8 @@ def _generate_thinking_variants():
         if ("generateContent" in model["supportedGenerationMethods"] and
             ("gemini-2.5-flash" in model["name"] or "gemini-2.5-pro" in model["name"] or
              "gemini-3-pro" in model["name"] or
-             "gemini-3-flash" in model["name"])):
+             "gemini-3-flash" in model["name"]or
+             "gemini-3.1-pro" in model["name"])):
 
             # Add -nothinking variant
             nothinking_variant = model.copy()
@@ -167,7 +168,8 @@ def _generate_combined_variants():
         if ("generateContent" in model["supportedGenerationMethods"] and
             ("gemini-2.5-flash" in model["name"] or "gemini-2.5-pro" in model["name"] or
              "gemini-3-pro" in model["name"] or
-             "gemini-3-flash" in model["name"])):
+             "gemini-3-flash" in model["name"] or
+             "gemini-3.1-pro" in model["name"])):
 
             # search + nothinking
             search_nothinking = model.copy()
@@ -239,7 +241,7 @@ def should_include_thoughts(model_name):
     if is_nothinking_model(model_name):
         # For nothinking mode, still include thoughts if it's a pro model
         base_model = get_base_model_name(model_name)
-        return "gemini-2.5-pro" in base_model or "gemini-3-pro" in base_model
+        return "gemini-2.5-pro" in base_model or "gemini-3-pro" in base_model or "gemini-3.1-pro" in base_model
     else:
         # For all other modes, include thoughts
         return True
