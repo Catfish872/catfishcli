@@ -50,36 +50,10 @@ GEMINI_RETRY_COUNT = int(os.getenv("GEMINI_RETRY_COUNT", "5"))
 # Base Models (without search variants)
 BASE_MODELS = [
     {
-        "name": "models/gemini-2.5-pro-preview-05-06",
-        "version": "001",
-        "displayName": "Gemini 2.5 Pro Preview 05-06",
-        "description": "Preview version of Gemini 2.5 Pro from May 6th",
-        "inputTokenLimit": 1048576,
-        "outputTokenLimit": 65535,
-        "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
-        "temperature": 1.0,
-        "maxTemperature": 2.0,
-        "topP": 0.95,
-        "topK": 64
-    },
-{
         "name": "models/gemini-3-flash-preview",
         "version": "001",
         "displayName": "Gemini 3 Flash Preview",
         "description": "Preview version of Gemini 3 Flash model",
-        "inputTokenLimit": 1048576,
-        "outputTokenLimit": 65535,
-        "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
-        "temperature": 1.0,
-        "maxTemperature": 2.0,
-        "topP": 0.95,
-        "topK": 64
-    },
-    {
-        "name": "models/gemini-flash-latest",
-        "version": "001",
-        "displayName": "gemini-flash-latest",
-        "description": "gemini-flash-latest",
         "inputTokenLimit": 1048576,
         "outputTokenLimit": 65535,
         "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
@@ -102,10 +76,10 @@ BASE_MODELS = [
         "topK": 64
     },
     {
-        "name": "models/gemini-2.5-pro-preview-06-05",
+        "name": "models/gemini-3.1-pro-preview",
         "version": "001",
-        "displayName": "Gemini 2.5 Pro Preview 06-05",
-        "description": "Preview version of Gemini 2.5 Pro from June 5th",
+        "displayName": "gemini-3.1-pro-preview",
+        "description": "gemini-3.1-pro-preview",
         "inputTokenLimit": 1048576,
         "outputTokenLimit": 65535,
         "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
@@ -119,32 +93,6 @@ BASE_MODELS = [
         "version": "001",
         "displayName": "Gemini 2.5 Pro",
         "description": "Advanced multimodal model with enhanced capabilities",
-        "inputTokenLimit": 1048576,
-        "outputTokenLimit": 65535,
-        "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
-        "temperature": 1.0,
-        "maxTemperature": 2.0,
-        "topP": 0.95,
-        "topK": 64
-    },
-    {
-        "name": "models/gemini-2.5-flash-preview-05-20",
-        "version": "001",
-        "displayName": "Gemini 2.5 Flash Preview 05-20",
-        "description": "Preview version of Gemini 2.5 Flash from May 20th",
-        "inputTokenLimit": 1048576,
-        "outputTokenLimit": 65535,
-        "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
-        "temperature": 1.0,
-        "maxTemperature": 2.0,
-        "topP": 0.95,
-        "topK": 64
-    },
-    {
-        "name": "models/gemini-2.5-flash-preview-04-17",
-        "version": "001",
-        "displayName": "Gemini 2.5 Flash Preview 04-17",
-        "description": "Preview version of Gemini 2.5 Flash from April 17th",
         "inputTokenLimit": 1048576,
         "outputTokenLimit": 65535,
         "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
@@ -274,12 +222,12 @@ def get_thinking_budget(model_name):
     if is_nothinking_model(model_name):
         if "gemini-2.5-flash" in base_model or "gemini-3-flash" in base_model:
             return 0  # No thinking for flash
-        elif "gemini-2.5-pro" in base_model or "gemini-3-pro" in base_model:
+        elif "gemini-2.5-pro" in base_model or "gemini-3-pro" in base_model or "gemini-3.1-pro" in base_model:
             return 512  # Limited thinking for pro
     elif is_maxthinking_model(model_name):
         if "gemini-2.5-flash" in base_model or "gemini-3-flash" in base_model:
             return 24576
-        elif "gemini-2.5-pro" in base_model or "gemini-3-pro" in base_model:
+        elif "gemini-2.5-pro" in base_model or "gemini-3-pro" in base_model or "gemini-3.1-pro" in base_model:
             return 32768
     else:
         # Default thinking budget for regular models
