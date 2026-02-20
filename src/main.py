@@ -18,13 +18,7 @@ from .gemini_routes import router as gemini_router
 from .openai_routes import router as openai_router
 from .auth import get_credentials, get_user_project_id, onboard_user, get_accounts_status_snapshot
 from .google_api_client import get_formatted_stats, get_usage_stats_snapshot
-from .dashboard_monitor import (
-    init_inmemory_log_handler,
-    get_recent_logs,
-    get_log_overview,
-    get_logs_since,
-    wait_for_log_update,
-)
+from . import dashboard_monitor
 from .config import DASHBOARD_TOKEN, CREDENTIAL_FILE
 
 # Load environment variables from .env file
@@ -219,7 +213,7 @@ _DASHBOARD_HTML = """
 @app.on_event("startup")
 async def startup_event():
     try:
-        init_inmemory_log_handler()
+        dashboard_monitor.init_inmemory_log_handler()
         logging.info("Starting Gemini proxy server...")
 
         env_creds_json = os.getenv("GEMINI_CREDENTIALS")
@@ -297,8 +291,8 @@ async def dashboard_page(request: Request):
 async def dashboard_logs(request: Request, limit: int = Query(300, ge=1, le=1000)):
     _verify_dashboard_token(request)
     return {
-        "overview": get_log_overview(),
-        "logs": get_recent_logs(limit=limit),
+        "overview": dashboard_monitor.get_log_overview(),
+        "logs": dashboard_monitor.get_recent_logs(limit=limit),
     }
 
 
@@ -323,15 +317,25 @@ async def dashboard_stream(request: Request):
 
         while True:
             try:
-                await asyncio.to_thread(wait_for_log_update, last_seq, 1.0)
-                logs, current_seq = get_logs_since(last_seq, limit=200)
-                last_seq = int(current_seq)
+                wait_for_update = getattr(dashboard_monitor, "wait_for_log_update", None)
+                get_since = getattr(dashboard_monitor, "get_logs_since", None)
+
+                if callable(wait_for_update):
+                    await asyncio.to_thread(wait_for_update, last_seq, 1.0)
+                else:
+                    await asyncio.sleep(1)
+
+                if callable(get_since):
+                    logs, current_seq = get_since(last_seq, limit=200)
+                    last_seq = int(current_seq)
+                else:
+                    logs = dashboard_monitor.get_recent_logs(limit=200)
 
                 payload = {
                     "stats": get_usage_stats_snapshot(),
                     "accounts": get_accounts_status_snapshot(),
                     "logs": {
-                        "overview": get_log_overview(),
+                        "overview": dashboard_monitor.get_log_overview(),
                         "logs": logs,
                     },
                 }
