@@ -226,7 +226,28 @@ def send_gemini_request(payload: dict, is_streaming: bool = False) -> Response:
 
             if is_429 or is_403 or is_empty_reply:  # <-- 修改此行 (增加 is_403)
                 reason = "status 429" if is_429 else ("status 403" if is_403 else "empty reply")  # <-- 修改此行
-                logging.warning(f"Attempt {attempt + 1} failed due to {reason}. Retrying...")
+
+                upstream_message = None
+                try:
+                    error_data = resp.json()
+                    if isinstance(error_data, dict):
+                        upstream_message = error_data.get("error", {}).get("message")
+                except (json.JSONDecodeError, ValueError, AttributeError):
+                    pass
+
+                if not upstream_message:
+                    raw_text = (resp.text or "").strip().replace("\n", " ").replace("\r", " ")
+                    if raw_text:
+                        upstream_message = raw_text[:300]
+
+                if upstream_message:
+                    logging.warning(
+                        f"Attempt {attempt + 1} failed due to {reason}. status={resp.status_code}, "
+                        f"upstream_message={upstream_message}. Retrying..."
+                    )
+                else:
+                    logging.warning(f"Attempt {attempt + 1} failed due to {reason}. Retrying...")
+
                 last_error_response = resp
                 if attempt < GEMINI_RETRY_COUNT:
                     continue
