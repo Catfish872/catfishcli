@@ -1,3 +1,5 @@
+import asyncio
+import json
 import logging
 import os
 import sys
@@ -11,12 +13,18 @@ logging.basicConfig(
 
 from fastapi import FastAPI, Request, Response, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from .gemini_routes import router as gemini_router
 from .openai_routes import router as openai_router
 from .auth import get_credentials, get_user_project_id, onboard_user, get_accounts_status_snapshot
 from .google_api_client import get_formatted_stats, get_usage_stats_snapshot
-from .dashboard_monitor import init_inmemory_log_handler, get_recent_logs, get_log_overview
+from .dashboard_monitor import (
+    init_inmemory_log_handler,
+    get_recent_logs,
+    get_log_overview,
+    get_logs_since,
+    wait_for_log_update,
+)
 from .config import DASHBOARD_TOKEN, CREDENTIAL_FILE
 
 # Load environment variables from .env file
@@ -120,14 +128,6 @@ _DASHBOARD_HTML = """
   <script>
     const urlToken = new URLSearchParams(window.location.search).get('token') || '';
 
-    async function fetchJson(path) {
-      const resp = await fetch(path, {
-        headers: { 'x-dashboard-token': urlToken }
-      });
-      if (!resp.ok) throw new Error(await resp.text());
-      return await resp.json();
-    }
-
     function esc(v) {
       const div = document.createElement('div');
       div.innerText = String(v ?? '');
@@ -140,80 +140,76 @@ _DASHBOARD_HTML = """
       return '<span class="warn">unknown</span>';
     }
 
-    let refreshingMeta = false;
-    let refreshingLogs = false;
+    function renderMeta(stats, accounts) {
+      document.getElementById('stats-summary').innerText =
+        `reset=${stats.last_reset_date} | success=${stats.total_success} | fail=${stats.total_fail} | total=${stats.total}`;
 
-    async function refreshMeta() {
-      if (refreshingMeta) return;
-      refreshingMeta = true;
-      try {
-        const [stats, accounts] = await Promise.all([
-          fetchJson('/dashboard/api/stats'),
-          fetchJson('/dashboard/api/accounts')
-        ]);
+      document.getElementById('stats-table').innerHTML = (stats.accounts || []).map(x => `
+        <tr>
+          <td>${esc(x.project_id)}</td><td>${esc(x.success)}</td><td>${esc(x.fail)}</td><td>${esc(x.total)}</td>
+        </tr>
+      `).join('') || '<tr><td colspan="4" class="muted">暂无数据</td></tr>';
 
-        document.getElementById('stats-summary').innerText =
-          `reset=${stats.last_reset_date} | success=${stats.total_success} | fail=${stats.total_fail} | total=${stats.total}`;
+      document.getElementById('accounts-summary').innerText = `total_accounts=${accounts.total_accounts}`;
+      document.getElementById('accounts-table').innerHTML = (accounts.accounts || []).map(x => `
+        <tr>
+          <td>${esc(x.project_id)}</td>
+          <td>${boolTag(x.has_access_token)}</td>
+          <td>${boolTag(x.has_refresh_token)}</td>
+          <td>${esc(x.expiry || '')}</td>
+          <td>${boolTag(x.is_expired)}</td>
+          <td>${boolTag(x.onboarding_complete)}</td>
+        </tr>
+      `).join('') || '<tr><td colspan="6" class="muted">暂无数据</td></tr>';
+    }
 
-        document.getElementById('stats-table').innerHTML = (stats.accounts || []).map(x => `
-          <tr>
-            <td>${esc(x.project_id)}</td><td>${esc(x.success)}</td><td>${esc(x.fail)}</td><td>${esc(x.total)}</td>
-          </tr>
-        `).join('') || '<tr><td colspan="4" class="muted">暂无数据</td></tr>';
+    function renderLogs(logsPayload) {
+      const logs = logsPayload.logs || [];
+      const container = document.getElementById('logs-container');
+      const nearBottom = (container.scrollHeight - container.scrollTop - container.clientHeight) < 24;
 
-        document.getElementById('accounts-summary').innerText = `total_accounts=${accounts.total_accounts}`;
-        document.getElementById('accounts-table').innerHTML = (accounts.accounts || []).map(x => `
-          <tr>
-            <td>${esc(x.project_id)}</td>
-            <td>${boolTag(x.has_access_token)}</td>
-            <td>${boolTag(x.has_refresh_token)}</td>
-            <td>${esc(x.expiry || '')}</td>
-            <td>${boolTag(x.is_expired)}</td>
-            <td>${boolTag(x.onboarding_complete)}</td>
-          </tr>
-        `).join('') || '<tr><td colspan="6" class="muted">暂无数据</td></tr>';
-      } catch (e) {
-        document.getElementById('stats-summary').innerText = `统计加载失败: ${e.message}`;
-      } finally {
-        refreshingMeta = false;
+      document.getElementById('logs-summary').innerText =
+        `buffer_size=${logsPayload.overview.buffer_size} | buffered=${logsPayload.overview.buffered} | current_seq=${logsPayload.overview.current_seq} | showing=${logs.length}`;
+
+      document.getElementById('logs-table').innerHTML = logs.map(x => `
+        <tr>
+          <td>${esc(x.timestamp)}</td>
+          <td>${esc(x.level)}</td>
+          <td>${esc(x.logger)}</td>
+          <td><pre>${esc(x.message)}</pre></td>
+        </tr>
+      `).join('') || '<tr><td colspan="4" class="muted">暂无日志</td></tr>';
+
+      if (nearBottom) {
+        container.scrollTop = container.scrollHeight;
       }
     }
 
-    async function refreshLogs() {
-      if (refreshingLogs) return;
-      refreshingLogs = true;
-      try {
-        const logs = await fetchJson('/dashboard/api/logs?limit=200');
+    function startRealtime() {
+      if (!urlToken) {
+        document.getElementById('logs-summary').innerText = '缺少 token，请使用 /dashboard?token=...';
+        return;
+      }
 
-        const container = document.getElementById('logs-container');
-        const nearBottom = (container.scrollHeight - container.scrollTop - container.clientHeight) < 24;
+      const streamUrl = `/dashboard/api/stream?token=${encodeURIComponent(urlToken)}`;
+      const es = new EventSource(streamUrl);
 
-        document.getElementById('logs-summary').innerText =
-          `buffer_size=${logs.overview.buffer_size} | buffered=${logs.overview.buffered} | showing=${(logs.logs || []).length}`;
-
-        document.getElementById('logs-table').innerHTML = (logs.logs || []).map(x => `
-          <tr>
-            <td>${esc(x.timestamp)}</td>
-            <td>${esc(x.level)}</td>
-            <td>${esc(x.logger)}</td>
-            <td><pre>${esc(x.message)}</pre></td>
-          </tr>
-        `).join('') || '<tr><td colspan="4" class="muted">暂无日志</td></tr>';
-
-        if (nearBottom) {
-          container.scrollTop = container.scrollHeight;
+      es.onmessage = (evt) => {
+        try {
+          const payload = JSON.parse(evt.data);
+          renderMeta(payload.stats || {}, payload.accounts || { total_accounts: 0, accounts: [] });
+          renderLogs(payload.logs || { overview: { buffer_size: 0, buffered: 0, current_seq: 0 }, logs: [] });
+        } catch (e) {
+          document.getElementById('logs-summary').innerText = `数据解析失败: ${e.message}`;
         }
-      } catch (e) {
-        document.getElementById('logs-summary').innerText = `日志加载失败: ${e.message}`;
-      } finally {
-        refreshingLogs = false;
-      }
+      };
+
+      es.onerror = () => {
+        document.getElementById('logs-summary').innerText = '实时连接中断，正在自动重连...';
+      };
     }
 
-    refreshMeta();
-    refreshLogs();
-    setInterval(refreshMeta, 5000);
-    setInterval(refreshLogs, 1000);
+    startRealtime();
   </script>
 </body>
 </html>
@@ -316,6 +312,38 @@ async def dashboard_accounts(request: Request):
 async def dashboard_stats(request: Request):
     _verify_dashboard_token(request)
     return get_usage_stats_snapshot()
+
+
+@app.get("/dashboard/api/stream")
+async def dashboard_stream(request: Request):
+    _verify_dashboard_token(request)
+
+    async def event_generator():
+        last_seq = int(request.query_params.get("last_seq", "0"))
+
+        while True:
+            try:
+                await asyncio.to_thread(wait_for_log_update, last_seq, 1.0)
+                logs, current_seq = get_logs_since(last_seq, limit=200)
+                last_seq = int(current_seq)
+
+                payload = {
+                    "stats": get_usage_stats_snapshot(),
+                    "accounts": get_accounts_status_snapshot(),
+                    "logs": {
+                        "overview": get_log_overview(),
+                        "logs": logs,
+                    },
+                }
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                err_payload = {"error": str(e)}
+                yield f"data: {json.dumps(err_payload, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(1)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 # Root endpoint - no authentication required
