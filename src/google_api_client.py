@@ -238,7 +238,7 @@ def send_gemini_request(payload: dict, is_streaming: bool = False) -> Response:
                 if not upstream_message:
                     raw_text = (resp.text or "").strip().replace("\n", " ").replace("\r", " ")
                     if raw_text:
-                        upstream_message = raw_text[:300]
+                        upstream_message = raw_text
 
                 if upstream_message:
                     logging.warning(
