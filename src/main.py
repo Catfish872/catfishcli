@@ -77,12 +77,14 @@ _DASHBOARD_HTML = """
     .ok { color: #10b981; }
     .warn { color: #f59e0b; }
     .err { color: #ef4444; }
+    .log-container { max-height: 420px; overflow-y: auto; border: 1px solid #374151; border-radius: 6px; }
+    #logs-table td pre { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   </style>
 </head>
 <body>
   <header>
     <h1>运行监控仪表盘</h1>
-    <div class="muted">自动刷新：5 秒 | 通过 URL 参数 token 或请求头 x-dashboard-token 鉴权</div>
+    <div class="muted">日志近实时刷新：1 秒 | 统计/凭证刷新：5 秒 | 通过 URL 参数 token 或请求头 x-dashboard-token 鉴权</div>
   </header>
   <main>
     <section class="card">
@@ -106,10 +108,12 @@ _DASHBOARD_HTML = """
     <section class="card">
       <h2>完整日志（最近 1000 条中的最新部分）</h2>
       <div id="logs-summary" class="muted">加载中...</div>
-      <table>
-        <thead><tr><th style="width:180px;">Time(UTC)</th><th style="width:80px;">Level</th><th style="width:160px;">Logger</th><th>Message</th></tr></thead>
-        <tbody id="logs-table"></tbody>
-      </table>
+      <div class="log-container" id="logs-container">
+        <table>
+          <thead><tr><th style="width:180px;">Time(UTC)</th><th style="width:80px;">Level</th><th style="width:160px;">Logger</th><th>Message</th></tr></thead>
+          <tbody id="logs-table"></tbody>
+        </table>
+      </div>
     </section>
   </main>
 
@@ -136,12 +140,16 @@ _DASHBOARD_HTML = """
       return '<span class="warn">unknown</span>';
     }
 
-    async function refreshAll() {
+    let refreshingMeta = false;
+    let refreshingLogs = false;
+
+    async function refreshMeta() {
+      if (refreshingMeta) return;
+      refreshingMeta = true;
       try {
-        const [stats, accounts, logs] = await Promise.all([
+        const [stats, accounts] = await Promise.all([
           fetchJson('/dashboard/api/stats'),
-          fetchJson('/dashboard/api/accounts'),
-          fetchJson('/dashboard/api/logs?limit=300')
+          fetchJson('/dashboard/api/accounts')
         ]);
 
         document.getElementById('stats-summary').innerText =
@@ -164,6 +172,21 @@ _DASHBOARD_HTML = """
             <td>${boolTag(x.onboarding_complete)}</td>
           </tr>
         `).join('') || '<tr><td colspan="6" class="muted">暂无数据</td></tr>';
+      } catch (e) {
+        document.getElementById('stats-summary').innerText = `统计加载失败: ${e.message}`;
+      } finally {
+        refreshingMeta = false;
+      }
+    }
+
+    async function refreshLogs() {
+      if (refreshingLogs) return;
+      refreshingLogs = true;
+      try {
+        const logs = await fetchJson('/dashboard/api/logs?limit=200');
+
+        const container = document.getElementById('logs-container');
+        const nearBottom = (container.scrollHeight - container.scrollTop - container.clientHeight) < 24;
 
         document.getElementById('logs-summary').innerText =
           `buffer_size=${logs.overview.buffer_size} | buffered=${logs.overview.buffered} | showing=${(logs.logs || []).length}`;
@@ -176,13 +199,21 @@ _DASHBOARD_HTML = """
             <td><pre>${esc(x.message)}</pre></td>
           </tr>
         `).join('') || '<tr><td colspan="4" class="muted">暂无日志</td></tr>';
+
+        if (nearBottom) {
+          container.scrollTop = container.scrollHeight;
+        }
       } catch (e) {
-        document.getElementById('logs-summary').innerText = `加载失败: ${e.message}`;
+        document.getElementById('logs-summary').innerText = `日志加载失败: ${e.message}`;
+      } finally {
+        refreshingLogs = false;
       }
     }
 
-    refreshAll();
-    setInterval(refreshAll, 5000);
+    refreshMeta();
+    refreshLogs();
+    setInterval(refreshMeta, 5000);
+    setInterval(refreshLogs, 1000);
   </script>
 </body>
 </html>
