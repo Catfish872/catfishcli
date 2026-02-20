@@ -66,27 +66,53 @@ def record_usage(project_id: str, success: bool):
             usage_stats["accounts"][project_id]["fail"] += 1
 
 
-def get_formatted_stats() -> str:
-    """获取格式化为文本表格的统计信息字符串。这是一个线程安全的函数。"""
+def get_usage_stats_snapshot() -> dict:
+    """获取结构化统计信息（线程安全），用于仪表盘 API。"""
     with stats_lock:
         _check_and_reset_stats()
         stats_copy = usage_stats.copy()
         accounts_copy = stats_copy["accounts"].copy()
 
+    account_items = []
+    for project_id, counts in sorted(accounts_copy.items()):
+        success = int(counts.get("success", 0))
+        fail = int(counts.get("fail", 0))
+        account_items.append(
+            {
+                "project_id": str(project_id),
+                "success": success,
+                "fail": fail,
+                "total": success + fail,
+            }
+        )
+
+    return {
+        "last_reset_date": str(stats_copy["last_reset_date"]),
+        "total_success": int(stats_copy.get("total_success", 0)),
+        "total_fail": int(stats_copy.get("total_fail", 0)),
+        "total": int(stats_copy.get("total_success", 0)) + int(stats_copy.get("total_fail", 0)),
+        "accounts": account_items,
+    }
+
+
+def get_formatted_stats() -> str:
+    """获取格式化为文本表格的统计信息字符串。这是一个线程安全的函数。"""
+    snapshot = get_usage_stats_snapshot()
+
     header = (
-        f"--- Daily Usage Statistics (Last Reset: {stats_copy['last_reset_date']}) ---\n"
-        f"Overall: {stats_copy['total_success']} Success, {stats_copy['total_fail']} Fail\n"
+        f"--- Daily Usage Statistics (Last Reset: {snapshot['last_reset_date']}) ---\n"
+        f"Overall: {snapshot['total_success']} Success, {snapshot['total_fail']} Fail\n"
         f"{'-' * 60}\n"
         f"| {'Project ID'.ljust(35)} | {'Success'.rjust(7)} | {'Fail'.rjust(7)} |\n"
         f"|{'-' * 37}|{'-' * 9}|{'-' * 9}|\n"
     )
 
     body = ""
-    if not accounts_copy:
+    if not snapshot["accounts"]:
         body = "| No account usage recorded today.                                  |\n"
     else:
-        for project_id, counts in sorted(accounts_copy.items()):
-            body += f"| {str(project_id).ljust(35)} | {str(counts['success']).rjust(7)} | {str(counts['fail']).rjust(7)} |\n"
+        for item in snapshot["accounts"]:
+            body += f"| {item['project_id'].ljust(35)} | {str(item['success']).rjust(7)} | {str(item['fail']).rjust(7)} |\n"
 
     footer = f"{'-' * 60}"
     return header + body + footer

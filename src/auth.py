@@ -318,6 +318,45 @@ def onboard_user(creds, project_id):
         raise Exception(f"User onboarding failed for project {project_id} due to an unexpected error: {str(e)}")
 
 
+def get_accounts_status_snapshot():
+    """返回用于仪表盘的凭证状态快照（不包含敏感 token）。"""
+    items = []
+    now_utc = datetime.now(timezone.utc)
+
+    with file_lock:
+        for acc in ACCOUNTS:
+            project_id = acc.get("project_id") or "unknown_project"
+            expiry_raw = acc.get("expiry")
+            expiry_iso = None
+            is_expired = None
+
+            if expiry_raw:
+                try:
+                    expiry_dt = datetime.fromisoformat(str(expiry_raw).replace("Z", "+00:00"))
+                    if not expiry_dt.tzinfo:
+                        expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
+                    expiry_iso = expiry_dt.astimezone(timezone.utc).isoformat()
+                    is_expired = expiry_dt <= now_utc
+                except Exception:
+                    expiry_iso = str(expiry_raw)
+
+            items.append(
+                {
+                    "project_id": project_id,
+                    "has_refresh_token": bool(acc.get("refresh_token")),
+                    "has_access_token": bool(acc.get("token") or acc.get("access_token")),
+                    "expiry": expiry_iso,
+                    "is_expired": is_expired,
+                    "onboarding_complete": bool(onboarding_complete_map.get(project_id)),
+                }
+            )
+
+    return {
+        "total_accounts": len(items),
+        "accounts": items,
+    }
+
+
 def _manual_oauth_flow():
     """Initiates the manual OAuth flow if no credentials file is found."""
     client_config = {"installed": {"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET, "auth_uri": "https://accounts.google.com/o/oauth2/auth", "token_uri": "https://oauth2.googleapis.com/token"}}

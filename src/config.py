@@ -27,6 +27,11 @@ CREDENTIAL_FILE = os.path.join(SCRIPT_DIR, os.getenv("GOOGLE_APPLICATION_CREDENT
 # Authentication
 GEMINI_AUTH_PASSWORD = os.getenv("GEMINI_AUTH_PASSWORD", "123456")
 
+DASHBOARD_TOKEN = os.getenv("DASHBOARD_TOKEN", "")
+
+# Dashboard in-memory log buffer size
+DASHBOARD_LOG_BUFFER_SIZE = int(os.getenv("DASHBOARD_LOG_BUFFER_SIZE", "1000"))
+
 # Default Safety Settings for Google API
 DEFAULT_SAFETY_SETTINGS = [
     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
