@@ -261,18 +261,18 @@ def send_gemini_request(payload: dict, is_streaming: bool = False) -> Response:
                 except (json.JSONDecodeError, ValueError, AttributeError):
                     pass
 
-                if not upstream_message:
-                    raw_text = (resp.text or "").strip().replace("\n", " ").replace("\r", " ")
-                    if raw_text:
-                        upstream_message = raw_text
+                upstream_body = (resp.text or "")
 
-                if upstream_message:
+                if upstream_body:
                     logging.warning(
                         f"Attempt {attempt + 1} failed due to {reason}. status={resp.status_code}, "
-                        f"upstream_message={upstream_message}. Retrying..."
+                        f"upstream_message={upstream_message or ''}, upstream_body={upstream_body} Retrying..."
                     )
                 else:
-                    logging.warning(f"Attempt {attempt + 1} failed due to {reason}. Retrying...")
+                    logging.warning(
+                        f"Attempt {attempt + 1} failed due to {reason}. status={resp.status_code}, "
+                        f"upstream_message={upstream_message or ''}. Retrying..."
+                    )
 
                 last_error_response = resp
                 if attempt < GEMINI_RETRY_COUNT:
