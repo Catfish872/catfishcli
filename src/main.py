@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 
 logging.basicConfig(
@@ -47,7 +48,7 @@ app.add_middleware(
 
 
 def _verify_dashboard_token(request: Request):
-    token = (DASHBOARD_TOKEN or "").strip()
+    token = (os.getenv("DASHBOARD_TOKEN") or DASHBOARD_TOKEN or "").strip()
     if not token:
         raise HTTPException(status_code=503, detail="DASHBOARD_TOKEN is not configured")
 
@@ -124,7 +125,9 @@ _DASHBOARD_HTML = """
     }
 
     function esc(v) {
-      return String(v ?? '').replace(/[&<>"']/g, s => ({'&':'&','<':'<','>':'>','"':'"',"'":'''}[s]));
+      const div = document.createElement('div');
+      div.innerText = String(v ?? '');
+      return div.innerHTML;
     }
 
     function boolTag(v) {
